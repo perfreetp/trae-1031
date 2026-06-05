@@ -118,7 +118,7 @@ const DeviceControl = () => {
   };
 
   const handleQuickAction = (action: 'temp_up' | 'timed_off' | 'batch_off', actionName: string) => {
-    const targetDevices = state.devices.filter(d => {
+    const targetDevices = filteredDevices.filter(d => {
       if (action === 'temp_up') return d.type === 'air_conditioner' && d.status === 'running';
       if (action === 'timed_off') return d.type === 'lighting';
       if (action === 'batch_off') return d.status === 'running' && d.status !== 'fault';
@@ -139,6 +139,10 @@ const DeviceControl = () => {
     });
     if (result) {
       let message = `已提交${actionName}申请，成功申请${result.deviceIds.length}台设备`;
+      if (filterStation !== 'all') {
+        const station = stations.find(s => s.id === filterStation);
+        message += `（仅限${station?.name || '当前站点'}）`;
+      }
       if (result.skippedDevices && result.skippedDevices.length > 0) {
         message += `，跳过${result.skippedDevices.length}台（已有待审批申请）`;
       }
@@ -194,20 +198,33 @@ const DeviceControl = () => {
             </div>
             <div>
               <p className="text-gray-400 text-xs mb-2">设备列表：</p>
-              <div className="space-y-1 max-h-40 overflow-y-auto">
+              <div className="space-y-2 max-h-60 overflow-y-auto">
                 {req.deviceIds.map((id, idx) => {
                   const device = state.devices.find(d => d.id === id);
                   return (
-                    <div key={id} className="flex items-center justify-between p-2 bg-sidebar-hover rounded text-xs">
-                      <div>
-                        <span className="text-white">{req.deviceNames[idx]}</span>
-                        <span className="text-gray-500 ml-2">{device?.stationName} · {device?.location}</span>
+                    <div key={id} className="p-3 bg-sidebar-hover rounded">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-white font-medium text-sm">{req.deviceNames[idx]}</span>
+                        <span className={`px-2 py-0.5 rounded text-xs ${
+                          device?.status === 'running' ? 'bg-success/20 text-success' : 'bg-gray-500/20 text-gray-400'
+                        }`}>
+                          提交时状态：{device ? getStatusText(device.status) : '未知'}
+                        </span>
                       </div>
-                      <span className={`px-1.5 py-0.5 rounded text-xs ${
-                        device?.status === 'running' ? 'bg-success/20 text-success' : 'bg-gray-500/20 text-gray-400'
-                      }`}>
-                        {device ? getStatusText(device.status) : '未知'}
-                      </span>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <span className="text-gray-500">所属站点：</span>
+                          <span className="text-gray-300">{device?.stationName}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">位置：</span>
+                          <span className="text-gray-300">{device?.location}</span>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="text-gray-500">申请操作：</span>
+                          <span className="text-primary-400 font-medium">{req.actionName}</span>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}

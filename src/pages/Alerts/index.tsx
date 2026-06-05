@@ -336,13 +336,15 @@ const Alerts = () => {
                           <Check className="w-4 h-4" />
                           处理
                         </button>
-                        <button
-                          onClick={() => handleProcess(alert, 'create_task')}
-                          className="px-4 py-2 bg-amber-600/20 text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-600/30 transition-colors text-sm font-medium flex items-center gap-1"
-                        >
-                          <Target className="w-4 h-4" />
-                          生成整改
-                        </button>
+                        {!alert.linkedTaskId && (
+                          <button
+                            onClick={() => handleProcess(alert, 'create_task')}
+                            className="px-4 py-2 bg-amber-600/20 text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-600/30 transition-colors text-sm font-medium flex items-center gap-1"
+                          >
+                            <Target className="w-4 h-4" />
+                            生成整改
+                          </button>
+                        )}
                         <button
                           onClick={() => handleProcess(alert, 'false_alarm')}
                           className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm font-medium flex items-center gap-1"
@@ -353,13 +355,24 @@ const Alerts = () => {
                       </>
                     )}
                     {alert.status === 'processing' && (
-                      <button
-                        onClick={() => handleProcess(alert, 'resolve')}
-                        className="px-4 py-2 bg-success text-white rounded-lg hover:bg-success/90 transition-colors text-sm font-medium flex items-center gap-1"
-                      >
-                        <CheckCircle className="w-4 h-4" />
-                        结案
-                      </button>
+                      <>
+                        {!alert.linkedTaskId && (
+                          <button
+                            onClick={() => handleProcess(alert, 'create_task')}
+                            className="px-4 py-2 bg-amber-600/20 text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-600/30 transition-colors text-sm font-medium flex items-center gap-1"
+                          >
+                            <Target className="w-4 h-4" />
+                            生成整改
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleProcess(alert, 'resolve')}
+                          className="px-4 py-2 bg-success text-white rounded-lg hover:bg-success/90 transition-colors text-sm font-medium flex items-center gap-1"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                          结案
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>

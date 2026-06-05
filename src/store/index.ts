@@ -153,19 +153,20 @@ export const useStore = () => {
   }, []);
 
   const updateTaskProgress = useCallback((taskId: string, completedAmount: number, progressPercent: number, remark?: string) => {
+    const newProgress = Math.min(100, Math.max(0, progressPercent));
+    const newTaskStatus = newProgress >= 100 ? 'completed' as const : 
+                         newProgress > 0 ? 'in_progress' as const : undefined;
+    
     setState(state => ({
       ...state,
       tasks: state.tasks.map(t => {
         if (t.id === taskId) {
-          const newProgress = Math.min(100, Math.max(0, progressPercent));
-          const newActualSaving = completedAmount;
-          const newStatus = newProgress >= 100 ? 'completed' as const : 
-                          newProgress > 0 ? 'in_progress' as const : t.status;
+          const finalStatus = newTaskStatus || t.status;
           return {
             ...t,
-            actualSaving: newActualSaving,
+            actualSaving: completedAmount,
             progress: newProgress,
-            status: newStatus,
+            status: finalStatus,
           };
         }
         return t;
@@ -173,9 +174,10 @@ export const useStore = () => {
       alerts: state.alerts.map(a => {
         if (a.linkedTaskId === taskId) {
           const task = state.tasks.find(t => t.id === taskId);
+          const finalTaskStatus = newTaskStatus || task?.status;
           return {
             ...a,
-            linkedTaskStatus: task ? (task.progress >= 100 ? 'completed' : task.status) : a.linkedTaskStatus,
+            linkedTaskStatus: finalTaskStatus,
           };
         }
         return a;
@@ -207,10 +209,10 @@ export const useStore = () => {
           let newStatus = d.status;
           if (action === 'start') {
             newStatus = 'running';
-          } else if (action === 'stop' || action === 'batch_off' || action === 'timed_off') {
-            newStatus = 'stopped';
+          } else if (action === 'stop' || action === 'batch_off' || action === 'timed_off' || action === 'temp_down' || action === 'temp_up') {
+            newStatus = action === 'start' ? 'running' : 'stopped';
           }
-          return { ...d, controlRequestStatus: 'approved' as const, status: newStatus };
+          return { ...d, controlRequestStatus: undefined, status: newStatus };
         }
         return d;
       }),
@@ -262,9 +264,13 @@ export const useStore = () => {
         if (a.id === alertId) {
           return {
             ...a,
+            status: 'processing' as const,
             linkedTaskId: taskId,
             linkedTaskTitle: taskData.title,
             linkedTaskStatus: 'pending',
+            handler: a.handler || '张工',
+            remark: a.remark ? `${a.remark}；已生成整改任务` : '已生成整改任务',
+            resolvedAt: a.resolvedAt,
           };
         }
         return a;

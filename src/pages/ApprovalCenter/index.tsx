@@ -137,16 +137,33 @@ const ApprovalCenter = () => {
                 <FileText className="w-3 h-3" />
                 设备明细
               </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto">
                 {req.deviceIds.map((id, idx) => {
                   const device = state.devices.find(d => d.id === id);
                   return (
-                    <div key={id} className="flex items-center justify-between p-2 bg-sidebar-hover rounded text-sm">
-                      <div>
-                        <span className="text-white">{req.deviceNames[idx]}</span>
-                        <span className="text-gray-500 ml-2 text-xs">{device?.location}</span>
+                    <div key={id} className="p-3 bg-sidebar-hover rounded">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-white font-medium text-sm">{req.deviceNames[idx]}</span>
+                        <span className={`px-2 py-0.5 rounded text-xs ${
+                          device?.status === 'running' ? 'bg-success/20 text-success' : 'bg-gray-500/20 text-gray-400'
+                        }`}>
+                          提交时：{device?.status === 'running' ? '运行中' : device?.status === 'stopped' ? '已停止' : '未知'}
+                        </span>
                       </div>
-                      <span className="text-xs text-gray-400">{device?.stationName}</span>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <span className="text-gray-500">站点：</span>
+                          <span className="text-gray-300">{device?.stationName}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">位置：</span>
+                          <span className="text-gray-300">{device?.location}</span>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="text-gray-500">操作：</span>
+                          <span className="text-primary-400 font-medium">{req.actionName}</span>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
