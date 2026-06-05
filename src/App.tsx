@@ -7,6 +7,7 @@ import Alerts from "@/pages/Alerts";
 import EnergyPlan from "@/pages/EnergyPlan";
 import MeterReading from "@/pages/MeterReading";
 import Reports from "@/pages/Reports";
+import ApprovalCenter from "@/pages/ApprovalCenter";
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="energy-plan" element={<EnergyPlan />} />
           <Route path="meter-reading" element={<MeterReading />} />
           <Route path="reports" element={<Reports />} />
+          <Route path="approval-center" element={<ApprovalCenter />} />
         </Route>
       </Routes>
     </Router>

@@ -1,12 +1,20 @@
 import { useState, useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
-import { Target, Plus, Calendar, User as UserIcon, TrendingUp, CheckCircle, Clock, AlertCircle, Filter } from 'lucide-react';
+import { Target, Plus, Calendar, User as UserIcon, TrendingUp, CheckCircle, Clock, AlertCircle, Filter, Edit, Save } from 'lucide-react';
 import { useStore } from '../../store';
+import type { EnergyTask } from '../../types';
 
 const EnergyPlan = () => {
-  const { state, addTask } = useStore();
+  const { state, addTask, updateTaskProgress } = useStore();
   const [filterStatus, setFilterStatus] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<EnergyTask | null>(null);
+  const [progressForm, setProgressForm] = useState({
+    completedAmount: 0,
+    progressPercent: 0,
+    remark: '',
+  });
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -79,9 +87,17 @@ const EnergyPlan = () => {
       alert('请填写完整的任务信息');
       return;
     }
+    const stationMap: Record<string, string> = {
+      '北京南站': 's1',
+      '上海虹桥站': 's2',
+      '广州南站': 's3',
+      '成都东站': 's4',
+      '北京车辆段': 's5',
+      '上海车辆段': 's6',
+    };
     addTask({
       ...formData,
-      stationId: 's1',
+      stationId: stationMap[formData.stationName] || 's1',
     });
     setFormData({
       title: '',
@@ -93,6 +109,50 @@ const EnergyPlan = () => {
       targetSaving: 0,
     });
     setShowAddModal(false);
+  };
+
+  const handleOpenProgress = (task: EnergyTask) => {
+    setSelectedTask(task);
+    setProgressForm({
+      completedAmount: task.actualSaving,
+      progressPercent: task.progress,
+      remark: '',
+    });
+    setShowProgressModal(true);
+  };
+
+  const handleSaveProgress = () => {
+    if (!selectedTask) return;
+    if (progressForm.progressPercent < 0 || progressForm.progressPercent > 100) {
+      alert('进度百分比必须在 0-100 之间');
+      return;
+    }
+    updateTaskProgress(selectedTask.id, progressForm.completedAmount, progressForm.progressPercent, progressForm.remark || undefined);
+    setShowProgressModal(false);
+    setSelectedTask(null);
+    setProgressForm({ completedAmount: 0, progressPercent: 0, remark: '' });
+  };
+
+  const handlePercentChange = (value: number) => {
+    if (!selectedTask) return;
+    const percent = Math.min(100, Math.max(0, value));
+    const estimatedAmount = Math.round((percent / 100) * selectedTask.targetSaving);
+    setProgressForm({
+      ...progressForm,
+      progressPercent: percent,
+      completedAmount: estimatedAmount,
+    });
+  };
+
+  const handleAmountChange = (value: number) => {
+    if (!selectedTask) return;
+    const amount = Math.max(0, value);
+    const percent = selectedTask.targetSaving > 0 ? Math.min(100, Math.round((amount / selectedTask.targetSaving) * 100)) : 0;
+    setProgressForm({
+      ...progressForm,
+      completedAmount: amount,
+      progressPercent: percent,
+    });
   };
 
   return (
@@ -192,6 +252,15 @@ const EnergyPlan = () => {
                     </div>
                     <p className="text-gray-400 text-sm mt-1">{task.description}</p>
                   </div>
+                  {task.status !== 'completed' && (
+                    <button
+                      onClick={() => handleOpenProgress(task)}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-primary-600/20 text-primary-400 text-sm rounded-lg hover:bg-primary-600/30 transition-colors"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                      更新进展
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-4 text-sm text-gray-400 mb-3">
@@ -213,7 +282,7 @@ const EnergyPlan = () => {
                   </div>
                   <div className="h-2 bg-sidebar-hover rounded-full overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all ${
+                      className={`h-full rounded-full transition-all duration-500 ${
                         task.status === 'completed' ? 'bg-success' :
                         task.status === 'overdue' ? 'bg-danger' : 'bg-primary-500'
                       }`}
@@ -387,6 +456,90 @@ const EnergyPlan = () => {
                 className="flex-1 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium"
               >
                 创建任务
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showProgressModal && selectedTask && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-card border border-card-border rounded-xl p-6 w-full max-w-md shadow-2xl">
+            <h3 className="text-xl font-bold text-white mb-4">更新任务进展</h3>
+            <div className="mb-4 p-3 bg-sidebar-hover rounded-lg">
+              <p className="text-white font-medium">{selectedTask.title}</p>
+              <p className="text-gray-400 text-sm mt-1">目标：{selectedTask.targetSaving.toLocaleString()} kWh</p>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-gray-400 text-sm block mb-2">
+                  进度百分比
+                  <span className="text-primary-400 ml-2 font-mono">{progressForm.progressPercent}%</span>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={progressForm.progressPercent}
+                  onChange={(e) => handlePercentChange(Number(e.target.value))}
+                  className="w-full h-2 bg-sidebar-hover rounded-lg appearance-none cursor-pointer accent-primary-500"
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>0%</span>
+                  <span>50%</span>
+                  <span>100%</span>
+                </div>
+              </div>
+              <div>
+                <label className="text-gray-400 text-sm block mb-2">本次完成节能 (kWh)</label>
+                <input
+                  type="number"
+                  value={progressForm.completedAmount || ''}
+                  onChange={(e) => handleAmountChange(Number(e.target.value))}
+                  className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                  placeholder="请输入完成量"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  当前进度对应预计完成：{progressForm.progressPercent > 0 
+                    ? Math.round((progressForm.progressPercent / 100) * selectedTask.targetSaving).toLocaleString() 
+                    : 0} kWh
+                </p>
+              </div>
+              <div>
+                <label className="text-gray-400 text-sm block mb-2">备注说明（可选）</label>
+                <textarea
+                  value={progressForm.remark}
+                  onChange={(e) => setProgressForm({ ...progressForm, remark: e.target.value })}
+                  className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500 resize-none"
+                  rows={2}
+                  placeholder="请输入本次更新的说明"
+                />
+              </div>
+              {progressForm.progressPercent >= 100 && (
+                <div className="p-3 bg-success/10 border border-success/30 rounded-lg">
+                  <p className="text-success text-sm flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4" />
+                    进度达到 100%，任务将自动标记为已完成
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowProgressModal(false);
+                  setSelectedTask(null);
+                }}
+                className="flex-1 py-2.5 bg-sidebar-hover text-gray-300 rounded-lg hover:bg-card-border transition-colors font-medium"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSaveProgress}
+                className="flex-1 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium flex items-center justify-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                保存更新
               </button>
             </div>
           </div>

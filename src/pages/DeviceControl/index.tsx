@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
-import { Power, PowerOff, Clock, Thermometer, Lightbulb, Settings, Filter, PlayCircle, AlertCircle, List, X, Check } from 'lucide-react';
+import { Power, PowerOff, Clock, Thermometer, Lightbulb, Settings, Filter, PlayCircle, AlertCircle, List, X, Check, ChevronDown, ChevronRight } from 'lucide-react';
 import { useStore } from '../../store';
-import type { Device } from '../../types';
+import type { Device, ControlRequest } from '../../types';
 
 const DeviceControl = () => {
   const { state, addControlRequest } = useStore();
@@ -12,7 +12,18 @@ const DeviceControl = () => {
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [controlAction, setControlAction] = useState<'start' | 'stop'>('start');
   const [showRequests, setShowRequests] = useState(false);
+  const [expandedRequest, setExpandedRequest] = useState<string | null>(null);
   const [applicant] = useState('张工');
+
+  const stations = useMemo(() => {
+    const stationMap = new Map<string, string>();
+    state.devices.forEach(d => {
+      if (!stationMap.has(d.stationId)) {
+        stationMap.set(d.stationId, d.stationName);
+      }
+    });
+    return Array.from(stationMap.entries()).map(([id, name]) => ({ id, name }));
+  }, [state.devices]);
 
   const filteredDevices = useMemo(() => {
     return state.devices.filter(d => {
@@ -72,7 +83,7 @@ const DeviceControl = () => {
     switch (status) {
       case 'pending': return '待审批';
       case 'approved': return '已批准';
-      case 'rejected': return '已拒绝';
+      case 'rejected': return '已驳回';
       default: return '';
     }
   };
@@ -89,39 +100,144 @@ const DeviceControl = () => {
 
   const handleConfirmControl = () => {
     if (!selectedDevice) return;
-    addControlRequest({
+    const result = addControlRequest({
       deviceIds: [selectedDevice.id],
       deviceNames: [selectedDevice.name],
+      stationIds: [],
+      stationNames: [],
       action: controlAction,
       actionName: controlAction === 'start' ? '开机' : '关机',
       applicant,
     });
-    setShowModal(false);
-    setSelectedDevice(null);
+    if (result) {
+      setShowModal(false);
+      setSelectedDevice(null);
+    } else {
+      alert('提交失败，该设备已有待审批申请');
+    }
   };
 
-  const handleQuickAction = (action: 'temp_up' | 'timed_off' | 'batch_stop', actionName: string) => {
+  const handleQuickAction = (action: 'temp_up' | 'timed_off' | 'batch_off', actionName: string) => {
     const targetDevices = state.devices.filter(d => {
       if (action === 'temp_up') return d.type === 'air_conditioner' && d.status === 'running';
       if (action === 'timed_off') return d.type === 'lighting';
-      if (action === 'batch_stop') return d.status === 'running' && d.status !== 'fault';
+      if (action === 'batch_off') return d.status === 'running' && d.status !== 'fault';
       return false;
     });
     if (targetDevices.length === 0) {
       alert('没有符合条件的设备');
       return;
     }
-    addControlRequest({
+    const result = addControlRequest({
       deviceIds: targetDevices.map(d => d.id),
       deviceNames: targetDevices.map(d => d.name),
+      stationIds: [],
+      stationNames: [],
       action,
       actionName,
       applicant,
     });
-    alert(`已提交${actionName}申请，共涉及${targetDevices.length}台设备`);
+    if (result) {
+      let message = `已提交${actionName}申请，成功申请${result.deviceIds.length}台设备`;
+      if (result.skippedDevices && result.skippedDevices.length > 0) {
+        message += `，跳过${result.skippedDevices.length}台（已有待审批申请）`;
+      }
+      alert(message);
+    }
   };
 
-  const stations = [...new Set(state.devices.map(d => d.stationName))];
+  const toggleExpand = (id: string) => {
+    setExpandedRequest(expandedRequest === id ? null : id);
+  };
+
+  const renderRequestDetail = (req: ControlRequest) => {
+    const isExpanded = expandedRequest === req.id;
+    return (
+      <div key={req.id} className="border border-card-border rounded-lg overflow-hidden">
+        <div 
+          className="flex items-center justify-between p-3 bg-sidebar-hover cursor-pointer hover:bg-sidebar-hover/80 transition-colors"
+          onClick={() => toggleExpand(req.id)}
+        >
+          <div className="flex items-center gap-2">
+            {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+            <div>
+              <p className="text-white text-sm font-medium">{req.actionName}</p>
+              <p className="text-gray-500 text-xs">
+                涉及 {req.deviceNames.length} 台设备 · 申请人: {req.applicant} · {req.createTime}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {req.skippedDevices && req.skippedDevices.length > 0 && (
+              <span className="text-xs px-2 py-0.5 rounded bg-amber-500/20 text-amber-400">
+                跳过 {req.skippedDevices.length} 台
+              </span>
+            )}
+            <span className={`px-2 py-1 rounded text-xs font-medium ${
+              req.status === 'pending' ? 'bg-warning/20 text-warning' :
+              req.status === 'approved' ? 'bg-success/20 text-success' :
+              'bg-gray-500/20 text-gray-400'
+            }`}>
+              {req.status === 'pending' ? '待审批' : req.status === 'approved' ? '已批准' : '已驳回'}
+            </span>
+          </div>
+        </div>
+        {isExpanded && (
+          <div className="p-3 bg-card border-t border-card-border space-y-3">
+            <div>
+              <p className="text-gray-400 text-xs mb-2">涉及站点：</p>
+              <div className="flex flex-wrap gap-1">
+                {req.stationNames.map((name, idx) => (
+                  <span key={idx} className="px-2 py-0.5 bg-primary-600/20 text-primary-400 text-xs rounded">{name}</span>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-gray-400 text-xs mb-2">设备列表：</p>
+              <div className="space-y-1 max-h-40 overflow-y-auto">
+                {req.deviceIds.map((id, idx) => {
+                  const device = state.devices.find(d => d.id === id);
+                  return (
+                    <div key={id} className="flex items-center justify-between p-2 bg-sidebar-hover rounded text-xs">
+                      <div>
+                        <span className="text-white">{req.deviceNames[idx]}</span>
+                        <span className="text-gray-500 ml-2">{device?.stationName} · {device?.location}</span>
+                      </div>
+                      <span className={`px-1.5 py-0.5 rounded text-xs ${
+                        device?.status === 'running' ? 'bg-success/20 text-success' : 'bg-gray-500/20 text-gray-400'
+                      }`}>
+                        {device ? getStatusText(device.status) : '未知'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {req.skippedDevices && req.skippedDevices.length > 0 && (
+              <div>
+                <p className="text-amber-400 text-xs mb-2">已跳过设备：</p>
+                <div className="space-y-1">
+                  {req.skippedDevices.map((dev, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-2 bg-amber-500/10 rounded text-xs border border-amber-500/20">
+                      <span className="text-amber-300">{dev.name}</span>
+                      <span className="text-amber-400">{dev.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {req.approver && (
+              <div className="pt-2 border-t border-card-border">
+                <p className="text-gray-400 text-xs">审批人：<span className="text-white">{req.approver}</span></p>
+                {req.approveRemark && <p className="text-gray-400 text-xs">审批意见：<span className="text-white">{req.approveRemark}</span></p>}
+                {req.approveTime && <p className="text-gray-400 text-xs">审批时间：<span className="text-white">{req.approveTime}</span></p>}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -153,28 +269,8 @@ const DeviceControl = () => {
           {state.controlRequests.length === 0 ? (
             <p className="text-gray-500 text-center py-8">暂无申请记录</p>
           ) : (
-            <div className="space-y-3 max-h-64 overflow-y-auto">
-              {state.controlRequests.map(req => (
-                <div key={req.id} className="flex items-center justify-between p-3 bg-sidebar-hover rounded-lg">
-                  <div>
-                    <p className="text-white text-sm font-medium">{req.actionName}</p>
-                    <p className="text-gray-500 text-xs">
-                      {req.deviceNames.length > 2 
-                        ? `${req.deviceNames.slice(0, 2).join('、')} 等${req.deviceNames.length}台设备`
-                        : req.deviceNames.join('、')
-                      }
-                    </p>
-                    <p className="text-gray-500 text-xs">申请人: {req.applicant} · {req.createTime}</p>
-                  </div>
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${
-                    req.status === 'pending' ? 'bg-warning/20 text-warning' :
-                    req.status === 'approved' ? 'bg-success/20 text-success' :
-                    'bg-gray-500/20 text-gray-400'
-                  }`}>
-                    {req.status === 'pending' ? '待审批' : req.status === 'approved' ? '已批准' : '已拒绝'}
-                  </span>
-                </div>
-              ))}
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {state.controlRequests.map(req => renderRequestDetail(req))}
             </div>
           )}
         </div>
@@ -233,8 +329,8 @@ const DeviceControl = () => {
           className="bg-sidebar-hover border border-card-border rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary-500"
         >
           <option value="all">全部站点</option>
-          {stations.map((name, idx) => (
-            <option key={idx} value={`s${idx + 1}`}>{name}</option>
+          {stations.map((station) => (
+            <option key={station.id} value={station.id}>{station.name}</option>
           ))}
         </select>
       </div>
@@ -368,7 +464,7 @@ const DeviceControl = () => {
                 <span className="text-gray-300 font-medium">公共区域照明 - 定时关闭</span>
               </button>
               <button
-                onClick={() => handleQuickAction('batch_stop', '非工作时段批量关机')}
+                onClick={() => handleQuickAction('batch_off', '非工作时段批量关机')}
                 className="w-full flex items-center gap-3 p-3 bg-sidebar-hover border border-card-border rounded-lg hover:border-primary-500/50 transition-colors"
               >
                 <PowerOff className="w-5 h-5 text-gray-400" />

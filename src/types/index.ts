@@ -49,18 +49,27 @@ export interface Alert {
   handler?: string;
   resolvedAt?: string;
   remark?: string;
+  linkedTaskId?: string;
+  linkedTaskTitle?: string;
+  linkedTaskStatus?: EnergyTask['status'];
 }
 
 export interface ControlRequest {
   id: string;
   deviceIds: string[];
   deviceNames: string[];
-  action: 'start' | 'stop' | 'temp_up' | 'temp_down' | 'timed_off';
+  stationIds: string[];
+  stationNames: string[];
+  action: 'start' | 'stop' | 'temp_up' | 'temp_down' | 'timed_off' | 'batch_off';
   actionName: string;
   applicant: string;
   createTime: string;
   status: 'pending' | 'approved' | 'rejected';
   remark?: string;
+  skippedDevices?: { id: string; name: string; reason: string }[];
+  approver?: string;
+  approveRemark?: string;
+  approveTime?: string;
 }
 
 export interface EnergyTask {
@@ -121,4 +130,23 @@ export interface NavItem {
   path: string;
   label: string;
   icon: string;
+}
+
+export interface ExportHistory {
+  id: string;
+  stationIds: string[];
+  stationNames: string[];
+  month: string;
+  format: 'csv' | 'txt';
+  exportTime: string;
+  fileName: string;
+  reportData: string;
+}
+
+export interface TaskProgressUpdate {
+  taskId: string;
+  completedAmount: number;
+  progressPercent: number;
+  remark?: string;
+  updatedAt: string;
 }

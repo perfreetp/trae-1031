@@ -1,12 +1,22 @@
 import { useState, useMemo } from 'react';
-import { ClipboardList, Plus, CheckCircle, AlertTriangle, FileCheck, Zap, Droplets, Flame, Filter, Upload, Eye, X } from 'lucide-react';
+import { ClipboardList, Plus, CheckCircle, AlertTriangle, FileCheck, Zap, Droplets, Flame, Filter, Upload, Eye, X, Layers } from 'lucide-react';
 import { useStore } from '../../store';
 import type { MeterReading, Bill } from '../../types';
 
-const MeterReading = () => {
+type MeterType = 'electricity' | 'water' | 'gas';
+
+interface BatchReadingItem {
+  meterId: string;
+  previousValue: number;
+  readingValue: number;
+  error: string;
+}
+
+const MeterReadingPage = () => {
   const { state, addMeterReading, updateBillStatus } = useStore();
   const [activeTab, setActiveTab] = useState<'reading' | 'bill'>('reading');
   const [filterType, setFilterType] = useState('all');
+  const [inputMode, setInputMode] = useState<'single' | 'batch'>('single');
   const [showAddModal, setShowAddModal] = useState(false);
   const [formData, setFormData] = useState({
     meterType: 'electricity' as const,
@@ -18,7 +28,23 @@ const MeterReading = () => {
     recorder: '张工',
     remark: '',
   });
+  const [batchForm, setBatchForm] = useState<{
+    stationName: string;
+    readingDate: string;
+    recorder: string;
+    readings: Record<MeterType, BatchReadingItem>;
+  }>({
+    stationName: '北京南站',
+    readingDate: new Date().toISOString().split('T')[0],
+    recorder: '张工',
+    readings: {
+      electricity: { meterId: '', previousValue: 0, readingValue: 0, error: '' },
+      water: { meterId: '', previousValue: 0, readingValue: 0, error: '' },
+      gas: { meterId: '', previousValue: 0, readingValue: 0, error: '' },
+    },
+  });
   const [error, setError] = useState('');
+  const [batchErrors, setBatchErrors] = useState<string[]>([]);
 
   const filteredReadings = useMemo(() => {
     return state.meterReadings.filter(r => {
@@ -79,6 +105,18 @@ const MeterReading = () => {
     }
   };
 
+  const getStationId = (name: string) => {
+    const stationMap: Record<string, string> = {
+      '北京南站': 's1',
+      '上海虹桥站': 's2',
+      '广州南站': 's3',
+      '成都东站': 's4',
+      '北京车辆段': 's5',
+      '上海车辆段': 's6',
+    };
+    return stationMap[name] || 's1';
+  };
+
   const handleSubmit = () => {
     setError('');
     
@@ -95,7 +133,7 @@ const MeterReading = () => {
     addMeterReading({
       meterId: formData.meterId,
       meterType: formData.meterType,
-      stationId: 's1',
+      stationId: getStationId(formData.stationName),
       stationName: formData.stationName,
       readingDate: formData.readingDate,
       readingValue: formData.readingValue,
@@ -115,6 +153,81 @@ const MeterReading = () => {
       remark: '',
     });
     setShowAddModal(false);
+  };
+
+  const validateBatchItem = (type: MeterType, item: BatchReadingItem): string => {
+    if (!item.meterId && !item.previousValue && !item.readingValue) {
+      return '';
+    }
+    if (!item.meterId) {
+      return '请填写表计编号';
+    }
+    if (!item.previousValue) {
+      return '请填写上期读数';
+    }
+    if (!item.readingValue) {
+      return '请填写本期读数';
+    }
+    if (item.readingValue < item.previousValue) {
+      return '本期读数不能小于上期读数';
+    }
+    return '';
+  };
+
+  const handleBatchSubmit = () => {
+    const errors: string[] = [];
+    const types: MeterType[] = ['electricity', 'water', 'gas'];
+    let successCount = 0;
+
+    const updatedReadings = { ...batchForm.readings };
+
+    types.forEach(type => {
+      const item = batchForm.readings[type];
+      const validationError = validateBatchItem(type, item);
+      
+      if (validationError) {
+        updatedReadings[type] = { ...item, error: validationError };
+        errors.push(`${getTypeLabel(type)}：${validationError}`);
+      } else if (item.meterId && item.readingValue > 0) {
+        addMeterReading({
+          meterId: item.meterId,
+          meterType: type,
+          stationId: getStationId(batchForm.stationName),
+          stationName: batchForm.stationName,
+          readingDate: batchForm.readingDate,
+          readingValue: item.readingValue,
+          previousValue: item.previousValue,
+          recorder: batchForm.recorder,
+        });
+        updatedReadings[type] = { meterId: '', previousValue: 0, readingValue: 0, error: '' };
+        successCount++;
+      }
+    });
+
+    setBatchForm({ ...batchForm, readings: updatedReadings });
+    setBatchErrors(errors);
+
+    if (successCount > 0) {
+      if (errors.length === 0) {
+        setShowAddModal(false);
+        setBatchErrors([]);
+      }
+    }
+  };
+
+  const updateBatchReading = (type: MeterType, field: keyof BatchReadingItem, value: string | number) => {
+    setBatchForm(prev => ({
+      ...prev,
+      readings: {
+        ...prev.readings,
+        [type]: {
+          ...prev.readings[type],
+          [field]: value,
+          error: '',
+        },
+      },
+    }));
+    setBatchErrors([]);
   };
 
   const autoCheckBill = (bill: Bill) => {
@@ -139,6 +252,26 @@ const MeterReading = () => {
     updateBillStatus(bill.id, statusMap[action]);
   };
 
+  const resetBatchForm = () => {
+    setBatchForm({
+      stationName: '北京南站',
+      readingDate: new Date().toISOString().split('T')[0],
+      recorder: '张工',
+      readings: {
+        electricity: { meterId: '', previousValue: 0, readingValue: 0, error: '' },
+        water: { meterId: '', previousValue: 0, readingValue: 0, error: '' },
+        gas: { meterId: '', previousValue: 0, readingValue: 0, error: '' },
+      },
+    });
+    setBatchErrors([]);
+  };
+
+  const openModal = () => {
+    setError('');
+    setBatchErrors([]);
+    setShowAddModal(true);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -147,13 +280,29 @@ const MeterReading = () => {
           <p className="text-gray-400 mt-1">人工抄表录入与账单核对管理</p>
         </div>
         {activeTab === 'reading' && (
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium"
-          >
-            <Plus className="w-4 h-4" />
-            录入抄表
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setInputMode('single');
+                openModal();
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-sidebar-hover border border-card-border text-white rounded-lg hover:border-primary-500/50 transition-colors font-medium"
+            >
+              <Plus className="w-4 h-4" />
+              单表录入
+            </button>
+            <button
+              onClick={() => {
+                setInputMode('batch');
+                resetBatchForm();
+                openModal();
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium"
+            >
+              <Layers className="w-4 h-4" />
+              批量录入
+            </button>
+          </div>
         )}
       </div>
 
@@ -392,140 +541,303 @@ const MeterReading = () => {
 
       {showAddModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-card border border-card-border rounded-xl p-6 w-full max-w-lg shadow-2xl">
-            <h3 className="text-xl font-bold text-white mb-4">录入抄表数据</h3>
+          <div className="bg-card border border-card-border rounded-xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+            <h3 className="text-xl font-bold text-white mb-4">
+              {inputMode === 'batch' ? '批量录入抄表数据' : '录入抄表数据'}
+            </h3>
+
             {error && (
               <div className="mb-4 p-3 bg-danger/20 border border-danger/30 rounded-lg">
                 <p className="text-danger text-sm">{error}</p>
               </div>
             )}
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-gray-400 text-sm block mb-2">表计类型</label>
-                  <select
-                    value={formData.meterType}
-                    onChange={(e) => setFormData({ ...formData, meterType: e.target.value as any })}
-                    className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
-                  >
-                    <option value="electricity">电表</option>
-                    <option value="water">水表</option>
-                    <option value="gas">气表</option>
-                  </select>
+
+            {batchErrors.length > 0 && (
+              <div className="mb-4 p-3 bg-danger/20 border border-danger/30 rounded-lg">
+                <p className="text-danger text-sm font-medium mb-2">以下数据未通过验证：</p>
+                <ul className="text-danger text-sm space-y-1">
+                  {batchErrors.map((err, idx) => (
+                    <li key={idx}>• {err}</li>
+                  ))}
+                </ul>
+                <p className="text-gray-400 text-xs mt-2">合法的数据已成功提交，请修正错误后重新提交</p>
+              </div>
+            )}
+
+            {inputMode === 'batch' ? (
+              <div className="space-y-6">
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-gray-400 text-sm block mb-2">所属站点</label>
+                    <select
+                      value={batchForm.stationName}
+                      onChange={(e) => setBatchForm({ ...batchForm, stationName: e.target.value })}
+                      className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                    >
+                      <option>北京南站</option>
+                      <option>上海虹桥站</option>
+                      <option>广州南站</option>
+                      <option>成都东站</option>
+                      <option>北京车辆段</option>
+                      <option>上海车辆段</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-sm block mb-2">抄表日期</label>
+                    <input
+                      type="date"
+                      value={batchForm.readingDate}
+                      onChange={(e) => setBatchForm({ ...batchForm, readingDate: e.target.value })}
+                      className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-sm block mb-2">抄表人</label>
+                    <select
+                      value={batchForm.recorder}
+                      onChange={(e) => setBatchForm({ ...batchForm, recorder: e.target.value })}
+                      className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                    >
+                      <option>张工</option>
+                      <option>李工</option>
+                      <option>王工</option>
+                      <option>赵工</option>
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-gray-400 text-sm block mb-2">所属站点</label>
-                  <select
-                    value={formData.stationName}
-                    onChange={(e) => setFormData({ ...formData, stationName: e.target.value })}
-                    className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+
+                {(['electricity', 'water', 'gas'] as MeterType[]).map((type) => {
+                  const reading = batchForm.readings[type];
+                  const consumption = reading.readingValue - reading.previousValue;
+                  const hasData = reading.meterId || reading.previousValue || reading.readingValue;
+
+                  return (
+                    <div
+                      key={type}
+                      className={`p-4 rounded-xl border transition-all ${
+                        reading.error
+                          ? 'bg-danger/10 border-danger/30'
+                          : hasData
+                          ? 'bg-primary-600/10 border-primary-500/30'
+                          : 'bg-sidebar-hover/50 border-card-border'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-4">
+                        {getTypeIcon(type)}
+                        <span className="text-white font-medium">{getTypeLabel(type)}</span>
+                        <span className="text-gray-500 text-xs">（可选，留空则不提交）</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="text-gray-400 text-sm block mb-2">表计编号</label>
+                          <input
+                            type="text"
+                            value={reading.meterId}
+                            onChange={(e) => updateBatchReading(type, 'meterId', e.target.value)}
+                            className={`w-full bg-sidebar-hover border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500 ${
+                              reading.error && !reading.meterId ? 'border-danger' : 'border-card-border'
+                            }`}
+                            placeholder={`如 ${type === 'electricity' ? 'D' : type === 'water' ? 'W' : 'G'}-001`}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-gray-400 text-sm block mb-2">上期读数 ({getUnit(type)})</label>
+                          <input
+                            type="number"
+                            value={reading.previousValue || ''}
+                            onChange={(e) => updateBatchReading(type, 'previousValue', Number(e.target.value))}
+                            className={`w-full bg-sidebar-hover border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500 ${
+                              reading.error && reading.previousValue === 0 && reading.meterId ? 'border-danger' : 'border-card-border'
+                            }`}
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-gray-400 text-sm block mb-2">本期读数 ({getUnit(type)})</label>
+                          <input
+                            type="number"
+                            value={reading.readingValue || ''}
+                            onChange={(e) => updateBatchReading(type, 'readingValue', Number(e.target.value))}
+                            className={`w-full bg-sidebar-hover border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500 ${
+                              reading.error && reading.readingValue < reading.previousValue ? 'border-danger' : 'border-card-border'
+                            }`}
+                            placeholder="0.00"
+                          />
+                        </div>
+                      </div>
+                      {hasData && reading.previousValue > 0 && reading.readingValue > 0 && (
+                        <div className="mt-3 p-2 bg-sidebar-hover rounded-lg">
+                          <p className="text-sm text-gray-400">
+                            预计用量: 
+                            <span className={`ml-2 font-mono font-medium ${
+                              reading.readingValue >= reading.previousValue ? 'text-primary-400' : 'text-danger'
+                            }`}>
+                              {reading.readingValue >= reading.previousValue
+                                ? `+${consumption.toLocaleString()} ${getUnit(type)}`
+                                : '读数不合法（本期 < 上期）'
+                              }
+                            </span>
+                          </p>
+                        </div>
+                      )}
+                      {reading.error && (
+                        <p className="mt-2 text-danger text-sm flex items-center gap-1">
+                          <AlertTriangle className="w-4 h-4" />
+                          {reading.error}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+
+                <div className="flex gap-3 pt-4 border-t border-card-border">
+                  <button
+                    onClick={() => {
+                      setShowAddModal(false);
+                      setBatchErrors([]);
+                    }}
+                    className="flex-1 py-2.5 bg-sidebar-hover text-gray-300 rounded-lg hover:bg-card-border transition-colors font-medium"
                   >
-                    <option>北京南站</option>
-                    <option>上海虹桥站</option>
-                    <option>广州南站</option>
-                    <option>成都东站</option>
-                    <option>北京车辆段</option>
-                    <option>上海车辆段</option>
-                  </select>
+                    取消
+                  </button>
+                  <button
+                    onClick={handleBatchSubmit}
+                    className="flex-1 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium flex items-center justify-center gap-2"
+                  >
+                    <Upload className="w-4 h-4" />
+                    确认录入
+                  </button>
                 </div>
               </div>
-              <div>
-                <label className="text-gray-400 text-sm block mb-2">表计编号</label>
-                <input
-                  type="text"
-                  value={formData.meterId}
-                  onChange={(e) => setFormData({ ...formData, meterId: e.target.value })}
-                  className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
-                  placeholder="请输入表计编号，如 D-001"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-gray-400 text-sm block mb-2">表计类型</label>
+                    <select
+                      value={formData.meterType}
+                      onChange={(e) => setFormData({ ...formData, meterType: e.target.value as any })}
+                      className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                    >
+                      <option value="electricity">电表</option>
+                      <option value="water">水表</option>
+                      <option value="gas">气表</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-sm block mb-2">所属站点</label>
+                    <select
+                      value={formData.stationName}
+                      onChange={(e) => setFormData({ ...formData, stationName: e.target.value })}
+                      className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                    >
+                      <option>北京南站</option>
+                      <option>上海虹桥站</option>
+                      <option>广州南站</option>
+                      <option>成都东站</option>
+                      <option>北京车辆段</option>
+                      <option>上海车辆段</option>
+                    </select>
+                  </div>
+                </div>
                 <div>
-                  <label className="text-gray-400 text-sm block mb-2">上期读数 ({getUnit(formData.meterType)})</label>
+                  <label className="text-gray-400 text-sm block mb-2">表计编号</label>
                   <input
-                    type="number"
-                    value={formData.previousValue || ''}
-                    onChange={(e) => setFormData({ ...formData, previousValue: Number(e.target.value) })}
+                    type="text"
+                    value={formData.meterId}
+                    onChange={(e) => setFormData({ ...formData, meterId: e.target.value })}
                     className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
-                    placeholder="0.00"
+                    placeholder="请输入表计编号，如 D-001"
                   />
                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-gray-400 text-sm block mb-2">上期读数 ({getUnit(formData.meterType)})</label>
+                    <input
+                      type="number"
+                      value={formData.previousValue || ''}
+                      onChange={(e) => setFormData({ ...formData, previousValue: Number(e.target.value) })}
+                      className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-sm block mb-2">本期读数 ({getUnit(formData.meterType)})</label>
+                    <input
+                      type="number"
+                      value={formData.readingValue || ''}
+                      onChange={(e) => setFormData({ ...formData, readingValue: Number(e.target.value) })}
+                      className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+                {formData.previousValue > 0 && formData.readingValue > 0 && (
+                  <div className="p-3 bg-sidebar-hover rounded-lg">
+                    <p className="text-sm text-gray-400">
+                      预计用量: <span className={`font-mono font-medium ${formData.readingValue >= formData.previousValue ? 'text-primary-400' : 'text-danger'}`}>
+                        {formData.readingValue >= formData.previousValue 
+                          ? `+${(formData.readingValue - formData.previousValue).toLocaleString()} ${getUnit(formData.meterType)}`
+                          : '读数不合法'
+                        }
+                      </span>
+                    </p>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-gray-400 text-sm block mb-2">抄表日期</label>
+                    <input
+                      type="date"
+                      value={formData.readingDate}
+                      onChange={(e) => setFormData({ ...formData, readingDate: e.target.value })}
+                      className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-sm block mb-2">抄表人</label>
+                    <select
+                      value={formData.recorder}
+                      onChange={(e) => setFormData({ ...formData, recorder: e.target.value })}
+                      className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                    >
+                      <option>张工</option>
+                      <option>李工</option>
+                      <option>王工</option>
+                      <option>赵工</option>
+                    </select>
+                  </div>
+                </div>
                 <div>
-                  <label className="text-gray-400 text-sm block mb-2">本期读数 ({getUnit(formData.meterType)})</label>
-                  <input
-                    type="number"
-                    value={formData.readingValue || ''}
-                    onChange={(e) => setFormData({ ...formData, readingValue: Number(e.target.value) })}
-                    className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
-                    placeholder="0.00"
+                  <label className="text-gray-400 text-sm block mb-2">备注</label>
+                  <textarea
+                    value={formData.remark}
+                    onChange={(e) => setFormData({ ...formData, remark: e.target.value })}
+                    className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500 resize-none"
+                    rows={2}
+                    placeholder="如有异常请在此说明"
                   />
                 </div>
-              </div>
-              {formData.previousValue > 0 && formData.readingValue > 0 && (
-                <div className="p-3 bg-sidebar-hover rounded-lg">
-                  <p className="text-sm text-gray-400">
-                    预计用量: <span className={`font-mono font-medium ${formData.readingValue >= formData.previousValue ? 'text-primary-400' : 'text-danger'}`}>
-                      {formData.readingValue >= formData.previousValue 
-                        ? `+${(formData.readingValue - formData.previousValue).toLocaleString()} ${getUnit(formData.meterType)}`
-                        : '读数不合法'
-                      }
-                    </span>
-                  </p>
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-gray-400 text-sm block mb-2">抄表日期</label>
-                  <input
-                    type="date"
-                    value={formData.readingDate}
-                    onChange={(e) => setFormData({ ...formData, readingDate: e.target.value })}
-                    className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-gray-400 text-sm block mb-2">抄表人</label>
-                  <select
-                    value={formData.recorder}
-                    onChange={(e) => setFormData({ ...formData, recorder: e.target.value })}
-                    className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={() => {
+                      setShowAddModal(false);
+                      setError('');
+                    }}
+                    className="flex-1 py-2.5 bg-sidebar-hover text-gray-300 rounded-lg hover:bg-card-border transition-colors font-medium"
                   >
-                    <option>张工</option>
-                    <option>李工</option>
-                    <option>王工</option>
-                    <option>赵工</option>
-                  </select>
+                    取消
+                  </button>
+                  <button
+                    onClick={handleSubmit}
+                    className="flex-1 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium flex items-center justify-center gap-2"
+                  >
+                    <Upload className="w-4 h-4" />
+                    确认录入
+                  </button>
                 </div>
               </div>
-              <div>
-                <label className="text-gray-400 text-sm block mb-2">备注</label>
-                <textarea
-                  value={formData.remark}
-                  onChange={(e) => setFormData({ ...formData, remark: e.target.value })}
-                  className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500 resize-none"
-                  rows={2}
-                  placeholder="如有异常请在此说明"
-                />
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowAddModal(false);
-                  setError('');
-                }}
-                className="flex-1 py-2.5 bg-sidebar-hover text-gray-300 rounded-lg hover:bg-card-border transition-colors font-medium"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleSubmit}
-                className="flex-1 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium flex items-center justify-center gap-2"
-              >
-                <Upload className="w-4 h-4" />
-                确认录入
-              </button>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -533,4 +845,4 @@ const MeterReading = () => {
   );
 };
 
-export default MeterReading;
+export default MeterReadingPage;

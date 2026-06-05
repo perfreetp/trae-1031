@@ -1,11 +1,12 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, LineChart, Settings, Bell, Target, ClipboardList, BarChart3, Train } from 'lucide-react';
+import { LayoutDashboard, LineChart, Settings, Bell, Target, ClipboardList, BarChart3, Train, CheckSquare } from 'lucide-react';
 import { useState } from 'react';
 
 const navItems = [
   { path: '/', label: '能耗看板', icon: LayoutDashboard },
   { path: '/monitoring', label: '分项监测', icon: LineChart },
   { path: '/device-control', label: '设备控制', icon: Settings },
+  { path: '/approval-center', label: '审批中心', icon: CheckSquare },
   { path: '/alerts', label: '告警中心', icon: Bell },
   { path: '/energy-plan', label: '节能计划', icon: Target },
   { path: '/meter-reading', label: '抄表核对', icon: ClipboardList },

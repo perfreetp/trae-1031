@@ -1,18 +1,20 @@
 import { useState, useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
 import * as echarts from 'echarts';
-import { BarChart3, Download, Calendar, TrendingUp, Leaf, DollarSign, Trophy, FileSpreadsheet, Filter, Check } from 'lucide-react';
+import { BarChart3, Download, Calendar, TrendingUp, Leaf, DollarSign, Trophy, FileSpreadsheet, Filter, Check, History, Clock, FileDown, RefreshCw } from 'lucide-react';
 import { stationRanking, carbonData, costForecast } from '../../data/mockData';
 import { useStore } from '../../store';
+import type { ExportHistory } from '../../types';
 
 const Reports = () => {
-  const { state } = useStore();
+  const { state, addExportHistory } = useStore();
   const [reportType, setReportType] = useState('ranking');
   const [timeRange, setTimeRange] = useState('month');
   const [exportMonth, setExportMonth] = useState('2026-06');
   const [selectedStation, setSelectedStation] = useState('all');
   const [exportFormat, setExportFormat] = useState('csv');
   const [isExporting, setIsExporting] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   const carbonOption = useMemo(() => ({
     tooltip: { trigger: 'axis', backgroundColor: '#1E293B', borderColor: '#334155', textStyle: { color: '#fff' } },
@@ -109,103 +111,142 @@ const Reports = () => {
     };
   };
 
+  const generateReportContent = (data: ReturnType<typeof generateReportData>, format: string): { content: string; fileName: string; mimeType: string } => {
+    if (format === 'csv') {
+      let csvContent = '\ufeff';
+      csvContent += '铁路能源管理月度报告\n';
+      csvContent += `报告月份,${data.monthLabel}\n`;
+      csvContent += `统计站点,${data.stations}\n`;
+      csvContent += `生成时间,${new Date().toLocaleString('zh-CN')}\n\n`;
+      
+      csvContent += '一、能耗汇总\n';
+      csvContent += '类别,用量,单位,费用(元)\n';
+      csvContent += `用电,${data.totalElectricity.toLocaleString()},kWh,${data.electricityCost.toLocaleString()}\n`;
+      csvContent += `用水,${data.totalWater.toLocaleString()},m³,${data.waterCost.toLocaleString()}\n`;
+      csvContent += `用气,${data.totalGas.toLocaleString()},m³,${data.gasCost.toLocaleString()}\n`;
+      csvContent += `合计,-,-,${data.totalCost.toLocaleString()}\n\n`;
+      
+      csvContent += '二、费用预测\n';
+      csvContent += `下月预测费用,${data.forecastCost.toLocaleString()}元\n`;
+      csvContent += `预测趋势,较本月下降 ${costForecast.trend}%\n\n`;
+      
+      csvContent += '三、碳排放估算\n';
+      csvContent += `本月碳排放总量,${data.totalCarbon.toLocaleString()} kgCO₂\n`;
+      csvContent += `折算种树,约 ${Math.round(data.totalCarbon / 18)} 棵\n\n`;
+      
+      csvContent += '四、同类站点能效排名\n';
+      csvContent += '排名,站点名称,类型,建筑面积(㎡),能效指标(kWh/百㎡),节能率(%)\n';
+      data.rankings.forEach(r => {
+        csvContent += `${r.rank},${r.name},${r.type},${r.area.toLocaleString()},${r.intensity},${r.savingRate}\n`;
+      });
+      
+      return {
+        content: csvContent,
+        fileName: `铁路能源月报_${data.month}.csv`,
+        mimeType: 'text/csv;charset=utf-8;',
+      };
+    } else {
+      let txtContent = '========================================\n';
+      txtContent += '       铁路能源管理月度报告\n';
+      txtContent += '========================================\n\n';
+      txtContent += `报告月份：${data.monthLabel}\n`;
+      txtContent += `统计站点：${data.stations}\n`;
+      txtContent += `生成时间：${new Date().toLocaleString('zh-CN')}\n\n`;
+      
+      txtContent += '----------------------------------------\n';
+      txtContent += '一、能耗汇总\n';
+      txtContent += '----------------------------------------\n';
+      txtContent += `用电：${data.totalElectricity.toLocaleString()} kWh  费用：¥${data.electricityCost.toLocaleString()}\n`;
+      txtContent += `用水：${data.totalWater.toLocaleString()} m³    费用：¥${data.waterCost.toLocaleString()}\n`;
+      txtContent += `用气：${data.totalGas.toLocaleString()} m³    费用：¥${data.gasCost.toLocaleString()}\n`;
+      txtContent += `----------------------------------------\n`;
+      txtContent += `合计：                    费用：¥${data.totalCost.toLocaleString()}\n\n`;
+      
+      txtContent += '----------------------------------------\n';
+      txtContent += '二、费用预测\n';
+      txtContent += '----------------------------------------\n';
+      txtContent += `下月预测费用：¥${data.forecastCost.toLocaleString()}\n`;
+      txtContent += `预测趋势：较本月下降 ${costForecast.trend}%\n\n`;
+      
+      txtContent += '----------------------------------------\n';
+      txtContent += '三、碳排放估算\n';
+      txtContent += '----------------------------------------\n';
+      txtContent += `本月碳排放总量：${data.totalCarbon.toLocaleString()} kgCO₂\n`;
+      txtContent += `折算种树：约 ${Math.round(data.totalCarbon / 18)} 棵（按每棵树年吸收18kgCO₂计算）\n\n`;
+      
+      txtContent += '----------------------------------------\n';
+      txtContent += '四、同类站点能效排名\n';
+      txtContent += '----------------------------------------\n';
+      txtContent += '排名  站点名称      类型    能效指标   节能率\n';
+      data.rankings.forEach(r => {
+        const medal = r.rank === 1 ? '🏆' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : '  ';
+        txtContent += `${medal} ${r.rank.toString().padStart(2, ' ')}   ${r.name.padEnd(10, ' ')} ${r.type.padEnd(4, ' ')}  ${r.intensity.padStart(6, ' ')}   ${r.savingRate.padStart(4, ' ')}%\n`;
+      });
+      
+      txtContent += '\n========================================\n';
+      txtContent += '    本报告由铁路能源管理系统自动生成\n';
+      txtContent += '========================================\n';
+      
+      return {
+        content: txtContent,
+        fileName: `铁路能源月报_${data.month}.txt`,
+        mimeType: 'text/plain;charset=utf-8;',
+      };
+    }
+  };
+
+  const downloadFile = (content: string, fileName: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const exportReport = () => {
     setIsExporting(true);
     const data = generateReportData();
     
     setTimeout(() => {
-      if (exportFormat === 'csv') {
-        let csvContent = '\ufeff';
-        csvContent += '铁路能源管理月度报告\n';
-        csvContent += `报告月份,${data.monthLabel}\n`;
-        csvContent += `统计站点,${data.stations}\n`;
-        csvContent += `生成时间,${new Date().toLocaleString('zh-CN')}\n\n`;
-        
-        csvContent += '一、能耗汇总\n';
-        csvContent += '类别,用量,单位,费用(元)\n';
-        csvContent += `用电,${data.totalElectricity.toLocaleString()},kWh,${data.electricityCost.toLocaleString()}\n`;
-        csvContent += `用水,${data.totalWater.toLocaleString()},m³,${data.waterCost.toLocaleString()}\n`;
-        csvContent += `用气,${data.totalGas.toLocaleString()},m³,${data.gasCost.toLocaleString()}\n`;
-        csvContent += `合计,-,-,${data.totalCost.toLocaleString()}\n\n`;
-        
-        csvContent += '二、费用预测\n';
-        csvContent += `下月预测费用,${data.forecastCost.toLocaleString()}元\n`;
-        csvContent += `预测趋势,较本月下降 ${costForecast.trend}%\n\n`;
-        
-        csvContent += '三、碳排放估算\n';
-        csvContent += `本月碳排放总量,${data.totalCarbon.toLocaleString()} kgCO₂\n`;
-        csvContent += `折算种树,约 ${Math.round(data.totalCarbon / 18)} 棵\n\n`;
-        
-        csvContent += '四、同类站点能效排名\n';
-        csvContent += '排名,站点名称,类型,建筑面积(㎡),能效指标(kWh/百㎡),节能率(%)\n';
-        data.rankings.forEach(r => {
-          csvContent += `${r.rank},${r.name},${r.type},${r.area.toLocaleString()},${r.intensity},${r.savingRate}\n`;
+      const { content, fileName, mimeType } = generateReportContent(data, exportFormat);
+      
+      const stationIds: string[] = [];
+      const stationNames: string[] = [];
+      if (selectedStation === 'all') {
+        stationRanking.forEach(s => {
+          stationIds.push(s.id);
+          stationNames.push(s.name);
         });
-        
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        link.setAttribute('href', url);
-        link.setAttribute('download', `铁路能源月报_${data.month}.csv`);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
       } else {
-        let txtContent = '========================================\n';
-        txtContent += '       铁路能源管理月度报告\n';
-        txtContent += '========================================\n\n';
-        txtContent += `报告月份：${data.monthLabel}\n`;
-        txtContent += `统计站点：${data.stations}\n`;
-        txtContent += `生成时间：${new Date().toLocaleString('zh-CN')}\n\n`;
-        
-        txtContent += '----------------------------------------\n';
-        txtContent += '一、能耗汇总\n';
-        txtContent += '----------------------------------------\n';
-        txtContent += `用电：${data.totalElectricity.toLocaleString()} kWh  费用：¥${data.electricityCost.toLocaleString()}\n`;
-        txtContent += `用水：${data.totalWater.toLocaleString()} m³    费用：¥${data.waterCost.toLocaleString()}\n`;
-        txtContent += `用气：${data.totalGas.toLocaleString()} m³    费用：¥${data.gasCost.toLocaleString()}\n`;
-        txtContent += `----------------------------------------\n`;
-        txtContent += `合计：                    费用：¥${data.totalCost.toLocaleString()}\n\n`;
-        
-        txtContent += '----------------------------------------\n';
-        txtContent += '二、费用预测\n';
-        txtContent += '----------------------------------------\n';
-        txtContent += `下月预测费用：¥${data.forecastCost.toLocaleString()}\n`;
-        txtContent += `预测趋势：较本月下降 ${costForecast.trend}%\n\n`;
-        
-        txtContent += '----------------------------------------\n';
-        txtContent += '三、碳排放估算\n';
-        txtContent += '----------------------------------------\n';
-        txtContent += `本月碳排放总量：${data.totalCarbon.toLocaleString()} kgCO₂\n`;
-        txtContent += `折算种树：约 ${Math.round(data.totalCarbon / 18)} 棵（按每棵树年吸收18kgCO₂计算）\n\n`;
-        
-        txtContent += '----------------------------------------\n';
-        txtContent += '四、同类站点能效排名\n';
-        txtContent += '----------------------------------------\n';
-        txtContent += '排名  站点名称      类型    能效指标   节能率\n';
-        data.rankings.forEach(r => {
-          const medal = r.rank === 1 ? '🏆' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : '  ';
-          txtContent += `${medal} ${r.rank.toString().padStart(2, ' ')}   ${r.name.padEnd(10, ' ')} ${r.type.padEnd(4, ' ')}  ${r.intensity.padStart(6, ' ')}   ${r.savingRate.padStart(4, ' ')}%\n`;
-        });
-        
-        txtContent += '\n========================================\n';
-        txtContent += '    本报告由铁路能源管理系统自动生成\n';
-        txtContent += '========================================\n';
-        
-        const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8;' });
-        const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        link.setAttribute('href', url);
-        link.setAttribute('download', `铁路能源月报_${data.month}.txt`);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const station = stationRanking.find(s => s.name.includes(selectedStation.replace('站', '')));
+        if (station) {
+          stationIds.push(station.id);
+          stationNames.push(station.name);
+        }
       }
       
+      addExportHistory({
+        stationIds,
+        stationNames,
+        month: exportMonth,
+        format: exportFormat as 'csv' | 'txt',
+        fileName,
+        reportData: content,
+      });
+      
+      downloadFile(content, fileName, mimeType);
       setIsExporting(false);
     }, 800);
+  };
+
+  const downloadHistory = (history: ExportHistory) => {
+    const mimeType = history.format === 'csv' ? 'text/csv;charset=utf-8;' : 'text/plain;charset=utf-8;';
+    downloadFile(history.reportData, history.fileName, mimeType);
   };
 
   return (
@@ -571,6 +612,74 @@ const Reports = () => {
                 )}
               </button>
             </div>
+
+            {state.exportHistories.length > 0 && (
+              <div className="mt-10 pt-8 border-t border-card-border">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <History className="w-5 h-5 text-primary-400" />
+                    <h3 className="text-lg font-semibold text-white">导出历史记录</h3>
+                    <span className="px-2 py-0.5 bg-primary-500/20 text-primary-300 text-xs rounded-full">
+                      {state.exportHistories.length} 条记录
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setShowHistory(!showHistory)}
+                    className="text-sm text-gray-400 hover:text-white transition-colors flex items-center gap-1"
+                  >
+                    {showHistory ? '收起' : '展开全部'}
+                    <span className={`transform transition-transform ${showHistory ? 'rotate-180' : ''}`}>▼</span>
+                  </button>
+                </div>
+
+                <div className={`space-y-3 ${showHistory ? '' : 'max-h-64 overflow-hidden'}`}>
+                  {state.exportHistories.map((history) => (
+                    <div
+                      key={history.id}
+                      className="flex items-center justify-between p-4 bg-sidebar-hover/50 rounded-lg hover:bg-sidebar-hover transition-colors border border-card-border"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="p-2 bg-primary-500/20 rounded-lg">
+                          <FileSpreadsheet className="w-5 h-5 text-primary-400" />
+                        </div>
+                        <div>
+                          <p className="text-white font-medium">{history.fileName}</p>
+                          <div className="flex items-center gap-3 mt-1 text-sm text-gray-400">
+                            <span className="flex items-center gap-1">
+                              <Calendar className="w-3.5 h-3.5" />
+                              {history.month}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5" />
+                              {history.exportTime}
+                            </span>
+                            <span className="px-1.5 py-0.5 bg-sidebar rounded text-xs">
+                              {history.format.toUpperCase()}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">
+                            站点：{history.stationNames.join('、')}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => downloadHistory(history)}
+                        className="flex items-center gap-2 px-4 py-2 bg-primary-600/20 text-primary-300 rounded-lg hover:bg-primary-600/30 transition-colors text-sm font-medium"
+                      >
+                        <FileDown className="w-4 h-4" />
+                        重新下载
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {!showHistory && state.exportHistories.length > 3 && (
+                  <div className="text-center mt-4">
+                    <p className="text-gray-500 text-sm">还有 {state.exportHistories.length - 3} 条历史记录</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -1,17 +1,23 @@
 import { useState, useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
-import { AlertTriangle, AlertCircle, CheckCircle, Clock, Filter, User, Check, X, MessageSquare, TrendingUp, Droplets, Flag } from 'lucide-react';
+import { AlertTriangle, AlertCircle, CheckCircle, Clock, Filter, User, Check, X, MessageSquare, TrendingUp, Droplets, Flag, Target, ExternalLink } from 'lucide-react';
 import { useStore } from '../../store';
 import type { Alert } from '../../types';
 
 const Alerts = () => {
-  const { state, updateAlertStatus } = useStore();
+  const { state, updateAlertStatus, createTaskFromAlert } = useStore();
   const [filterLevel, setFilterLevel] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
-  const [actionType, setActionType] = useState<'process' | 'resolve' | 'false_alarm'>('process');
+  const [actionType, setActionType] = useState<'process' | 'resolve' | 'false_alarm' | 'create_task'>('process');
   const [handler, setHandler] = useState('张工');
   const [remark, setRemark] = useState('');
+  const [taskForm, setTaskForm] = useState({
+    title: '',
+    description: '',
+    assignee: '张工',
+    targetSaving: 0,
+  });
 
   const filteredAlerts = useMemo(() => {
     return state.alerts.filter(a => {
@@ -82,6 +88,26 @@ const Alerts = () => {
     }
   };
 
+  const getTaskStatusColor = (status?: string) => {
+    switch (status) {
+      case 'pending': return 'bg-gray-500/20 text-gray-400';
+      case 'in_progress': return 'bg-primary-500/20 text-primary-400';
+      case 'completed': return 'bg-success/20 text-success';
+      case 'overdue': return 'bg-danger/20 text-danger';
+      default: return 'bg-gray-500/20 text-gray-400';
+    }
+  };
+
+  const getTaskStatusLabel = (status?: string) => {
+    switch (status) {
+      case 'pending': return '待开始';
+      case 'in_progress': return '进行中';
+      case 'completed': return '已完成';
+      case 'overdue': return '已逾期';
+      default: return '未知';
+    }
+  };
+
   const getTypeIcon = (type: string) => {
     switch (type) {
       case 'energy_fluctuation': return <TrendingUp className="w-5 h-5 text-warning" />;
@@ -92,14 +118,44 @@ const Alerts = () => {
     }
   };
 
-  const handleProcess = (alert: Alert, action: 'process' | 'resolve' | 'false_alarm') => {
+  const handleProcess = (alert: Alert, action: 'process' | 'resolve' | 'false_alarm' | 'create_task') => {
     setSelectedAlert(alert);
     setActionType(action);
     setRemark('');
+    if (action === 'create_task') {
+      setTaskForm({
+        title: `【整改】${alert.description.slice(0, 20)}`,
+        description: `告警原因：${alert.description}\n当前值：${alert.value}，阈值：${alert.threshold}\n整改要求：请尽快排查并处理此问题，确保能耗恢复正常。`,
+        assignee: '张工',
+        targetSaving: 500,
+      });
+    }
   };
 
   const handleConfirm = () => {
     if (!selectedAlert) return;
+    
+    if (actionType === 'create_task') {
+      const today = new Date();
+      const endDate = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const formatDate = (d: Date) => d.toISOString().split('T')[0];
+      
+      createTaskFromAlert(selectedAlert.id, {
+        title: taskForm.title,
+        description: taskForm.description,
+        stationId: selectedAlert.stationId,
+        stationName: selectedAlert.stationName,
+        assignee: taskForm.assignee,
+        startDate: formatDate(today),
+        endDate: formatDate(endDate),
+        targetSaving: taskForm.targetSaving,
+      });
+      
+      updateAlertStatus(selectedAlert.id, 'processing', handler, '已生成整改任务');
+      setSelectedAlert(null);
+      setTaskForm({ title: '', description: '', assignee: '张工', targetSaving: 0 });
+      return;
+    }
     
     let newStatus: Alert['status'];
     switch (actionType) {
@@ -126,6 +182,7 @@ const Alerts = () => {
       case 'process': return '处理告警';
       case 'resolve': return '结案确认';
       case 'false_alarm': return '标记误报';
+      case 'create_task': return '生成整改任务';
       default: return '处理告警';
     }
   };
@@ -251,6 +308,23 @@ const Alerts = () => {
                         <p className="text-xs text-gray-400">处理说明: <span className="text-gray-300">{alert.remark}</span></p>
                       </div>
                     )}
+                    {alert.linkedTaskId && (
+                      <div className="mt-3 p-3 bg-primary-600/10 border border-primary-500/30 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Target className="w-4 h-4 text-primary-400" />
+                            <span className="text-primary-300 text-sm font-medium">关联整改任务</span>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${getTaskStatusColor(alert.linkedTaskStatus)}`}>
+                            {getTaskStatusLabel(alert.linkedTaskStatus)}
+                          </span>
+                        </div>
+                        <p className="text-white text-sm mt-2 flex items-center gap-2">
+                          <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                          {alert.linkedTaskTitle}
+                        </p>
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-col gap-2">
                     {alert.status === 'pending' && (
@@ -261,6 +335,13 @@ const Alerts = () => {
                         >
                           <Check className="w-4 h-4" />
                           处理
+                        </button>
+                        <button
+                          onClick={() => handleProcess(alert, 'create_task')}
+                          className="px-4 py-2 bg-amber-600/20 text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-600/30 transition-colors text-sm font-medium flex items-center gap-1"
+                        >
+                          <Target className="w-4 h-4" />
+                          生成整改
                         </button>
                         <button
                           onClick={() => handleProcess(alert, 'false_alarm')}
@@ -354,7 +435,7 @@ const Alerts = () => {
 
       {selectedAlert && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-card border border-card-border rounded-xl p-6 w-full max-w-lg shadow-2xl">
+          <div className="bg-card border border-card-border rounded-xl p-6 w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-bold text-white mb-4">
               {getModalTitle()}
             </h3>
@@ -364,29 +445,86 @@ const Alerts = () => {
               <p className="text-gray-500 text-sm mt-2">{selectedAlert.stationName} - {selectedAlert.location}</p>
             </div>
             <div className="space-y-4">
-              <div>
-                <label className="text-gray-400 text-sm block mb-2">处理人</label>
-                <select
-                  value={handler}
-                  onChange={(e) => setHandler(e.target.value)}
-                  className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
-                >
-                  <option value="张工">张工</option>
-                  <option value="李工">李工</option>
-                  <option value="王工">王工</option>
-                  <option value="赵工">赵工</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-gray-400 text-sm block mb-2">处理说明</label>
-                <textarea
-                  value={remark}
-                  onChange={(e) => setRemark(e.target.value)}
-                  className="w-full bg-sidebar-hover border border-card-border rounded-lg p-3 text-white text-sm focus:outline-none focus:border-primary-500 resize-none"
-                  rows={3}
-                  placeholder="请输入处理说明..."
-                />
-              </div>
+              {actionType === 'create_task' ? (
+                <>
+                  <div>
+                    <label className="text-gray-400 text-sm block mb-2">任务名称</label>
+                    <input
+                      type="text"
+                      value={taskForm.title}
+                      onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
+                      className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                      placeholder="请输入任务名称"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-sm block mb-2">任务描述</label>
+                    <textarea
+                      value={taskForm.description}
+                      onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })}
+                      className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500 resize-none"
+                      rows={4}
+                      placeholder="请输入任务描述"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-gray-400 text-sm block mb-2">责任人</label>
+                      <select
+                        value={taskForm.assignee}
+                        onChange={(e) => setTaskForm({ ...taskForm, assignee: e.target.value })}
+                        className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                      >
+                        <option>张工</option>
+                        <option>李工</option>
+                        <option>王工</option>
+                        <option>赵工</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-gray-400 text-sm block mb-2">目标节能 (kWh)</label>
+                      <input
+                        type="number"
+                        value={taskForm.targetSaving || ''}
+                        onChange={(e) => setTaskForm({ ...taskForm, targetSaving: Number(e.target.value) })}
+                        className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                        placeholder="目标节能"
+                      />
+                    </div>
+                  </div>
+                  <div className="p-3 bg-primary-600/10 border border-primary-500/30 rounded-lg">
+                    <p className="text-primary-300 text-xs">
+                      任务将自动设置开始日期为今日，结束日期为7天后，责任站点为告警所属站点
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-gray-400 text-sm block mb-2">处理人</label>
+                    <select
+                      value={handler}
+                      onChange={(e) => setHandler(e.target.value)}
+                      className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                    >
+                      <option value="张工">张工</option>
+                      <option value="李工">李工</option>
+                      <option value="王工">王工</option>
+                      <option value="赵工">赵工</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-sm block mb-2">处理说明</label>
+                    <textarea
+                      value={remark}
+                      onChange={(e) => setRemark(e.target.value)}
+                      className="w-full bg-sidebar-hover border border-card-border rounded-lg p-3 text-white text-sm focus:outline-none focus:border-primary-500 resize-none"
+                      rows={3}
+                      placeholder="请输入处理说明..."
+                    />
+                  </div>
+                </>
+              )}
             </div>
             <div className="flex gap-3 mt-6">
               <button
@@ -402,10 +540,12 @@ const Alerts = () => {
                     ? 'bg-success text-white hover:bg-success/90'
                     : actionType === 'false_alarm'
                     ? 'bg-gray-600 text-white hover:bg-gray-700'
+                    : actionType === 'create_task'
+                    ? 'bg-amber-600 text-white hover:bg-amber-700'
                     : 'bg-primary-600 text-white hover:bg-primary-700'
                 }`}
               >
-                确认
+                {actionType === 'create_task' ? '生成任务' : '确认'}
               </button>
             </div>
           </div>
