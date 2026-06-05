@@ -4,6 +4,13 @@ import { Power, PowerOff, Clock, Thermometer, Lightbulb, Settings, Filter, PlayC
 import { useStore } from '../../store';
 import type { Device, ControlRequest } from '../../types';
 
+interface QuickActionPreview {
+  action: 'temp_up' | 'timed_off' | 'batch_off';
+  actionName: string;
+  targetDevices: Device[];
+  skippedDevices: { id: string; name: string; reason: string }[];
+}
+
 const DeviceControl = () => {
   const { state, addControlRequest } = useStore();
   const [filterType, setFilterType] = useState<'all' | 'air_conditioner' | 'lighting'>('all');
@@ -14,6 +21,8 @@ const DeviceControl = () => {
   const [showRequests, setShowRequests] = useState(false);
   const [expandedRequest, setExpandedRequest] = useState<string | null>(null);
   const [applicant] = useState('张工');
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewData, setPreviewData] = useState<QuickActionPreview | null>(null);
 
   const stations = useMemo(() => {
     const stationMap = new Map<string, string>();
@@ -128,17 +137,37 @@ const DeviceControl = () => {
       alert('没有符合条件的设备');
       return;
     }
-    const result = addControlRequest({
-      deviceIds: targetDevices.map(d => d.id),
-      deviceNames: targetDevices.map(d => d.name),
-      stationIds: [],
-      stationNames: [],
+    
+    const pendingDeviceIds = state.devices
+      .filter(d => d.controlRequestStatus === 'pending')
+      .map(d => d.id);
+    const skippedDevices = targetDevices
+      .filter(d => pendingDeviceIds.includes(d.id))
+      .map(d => ({ id: d.id, name: d.name, reason: '已有待审批申请' }));
+    const validDevices = targetDevices.filter(d => !pendingDeviceIds.includes(d.id));
+    
+    setPreviewData({
       action,
       actionName,
+      targetDevices: validDevices,
+      skippedDevices,
+    });
+    setShowPreview(true);
+  };
+
+  const confirmQuickAction = () => {
+    if (!previewData) return;
+    const result = addControlRequest({
+      deviceIds: previewData.targetDevices.map(d => d.id),
+      deviceNames: previewData.targetDevices.map(d => d.name),
+      stationIds: [],
+      stationNames: [],
+      action: previewData.action,
+      actionName: previewData.actionName,
       applicant,
     });
     if (result) {
-      let message = `已提交${actionName}申请，成功申请${result.deviceIds.length}台设备`;
+      let message = `已提交${previewData.actionName}申请，成功申请${result.deviceIds.length}台设备`;
       if (filterStation !== 'all') {
         const station = stations.find(s => s.id === filterStation);
         message += `（仅限${station?.name || '当前站点'}）`;
@@ -148,6 +177,8 @@ const DeviceControl = () => {
       }
       alert(message);
     }
+    setShowPreview(false);
+    setPreviewData(null);
   };
 
   const toggleExpand = (id: string) => {
@@ -199,26 +230,25 @@ const DeviceControl = () => {
             <div>
               <p className="text-gray-400 text-xs mb-2">设备列表：</p>
               <div className="space-y-2 max-h-60 overflow-y-auto">
-                {req.deviceIds.map((id, idx) => {
-                  const device = state.devices.find(d => d.id === id);
-                  return (
-                    <div key={id} className="p-3 bg-sidebar-hover rounded">
+                {req.deviceSnapshots && req.deviceSnapshots.length > 0 ? (
+                  req.deviceSnapshots.map((snapshot) => (
+                    <div key={snapshot.id} className="p-3 bg-sidebar-hover rounded">
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-white font-medium text-sm">{req.deviceNames[idx]}</span>
+                        <span className="text-white font-medium text-sm">{snapshot.name}</span>
                         <span className={`px-2 py-0.5 rounded text-xs ${
-                          device?.status === 'running' ? 'bg-success/20 text-success' : 'bg-gray-500/20 text-gray-400'
+                          snapshot.status === 'running' ? 'bg-success/20 text-success' : 'bg-gray-500/20 text-gray-400'
                         }`}>
-                          提交时状态：{device ? getStatusText(device.status) : '未知'}
+                          提交时状态：{getStatusText(snapshot.status)}
                         </span>
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         <div>
                           <span className="text-gray-500">所属站点：</span>
-                          <span className="text-gray-300">{device?.stationName}</span>
+                          <span className="text-gray-300">{snapshot.stationName}</span>
                         </div>
                         <div>
                           <span className="text-gray-500">位置：</span>
-                          <span className="text-gray-300">{device?.location}</span>
+                          <span className="text-gray-300">{snapshot.location}</span>
                         </div>
                         <div className="col-span-2">
                           <span className="text-gray-500">申请操作：</span>
@@ -226,8 +256,38 @@ const DeviceControl = () => {
                         </div>
                       </div>
                     </div>
-                  );
-                })}
+                  ))
+                ) : (
+                  req.deviceIds.map((id, idx) => {
+                    const device = state.devices.find(d => d.id === id);
+                    return (
+                      <div key={id} className="p-3 bg-sidebar-hover rounded">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-white font-medium text-sm">{req.deviceNames[idx]}</span>
+                          <span className={`px-2 py-0.5 rounded text-xs ${
+                            device?.status === 'running' ? 'bg-success/20 text-success' : 'bg-gray-500/20 text-gray-400'
+                          }`}>
+                            当前状态：{device ? getStatusText(device.status) : '未知'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <span className="text-gray-500">所属站点：</span>
+                            <span className="text-gray-300">{device?.stationName}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-500">位置：</span>
+                            <span className="text-gray-300">{device?.location}</span>
+                          </div>
+                          <div className="col-span-2">
+                            <span className="text-gray-500">申请操作：</span>
+                            <span className="text-primary-400 font-medium">{req.actionName}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
             {req.skippedDevices && req.skippedDevices.length > 0 && (
@@ -527,6 +587,111 @@ const DeviceControl = () => {
               >
                 <Check className="w-4 h-4" />
                 确认{controlAction === 'start' ? '开机' : '关机'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPreview && previewData && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-card border border-card-border rounded-xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-white">批量操作预览 - {previewData.actionName}</h3>
+              <button
+                onClick={() => { setShowPreview(false); setPreviewData(null); }}
+                className="text-gray-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-sidebar-hover rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-primary-400">
+                    {[...new Set(previewData.targetDevices.map(d => d.stationId))].length}
+                  </p>
+                  <p className="text-gray-400 text-sm mt-1">涉及站点</p>
+                </div>
+                <div className="bg-sidebar-hover rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-success">
+                    {previewData.targetDevices.length}
+                  </p>
+                  <p className="text-gray-400 text-sm mt-1">待申请设备</p>
+                </div>
+                <div className="bg-sidebar-hover rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-amber-400">
+                    {previewData.skippedDevices.length}
+                  </p>
+                  <p className="text-gray-400 text-sm mt-1">跳过设备</p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-gray-400 text-sm mb-2">涉及站点：</p>
+                <div className="flex flex-wrap gap-1">
+                  {[...new Set(previewData.targetDevices.map(d => d.stationName))].map((name, idx) => (
+                    <span key={idx} className="px-2 py-0.5 bg-primary-600/20 text-primary-400 text-xs rounded">
+                      {name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-gray-400 text-sm mb-2">待申请设备列表：</p>
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {previewData.targetDevices.map((device) => (
+                    <div key={device.id} className="flex items-center justify-between p-2 bg-sidebar-hover rounded text-xs">
+                      <div>
+                        <span className="text-white">{device.name}</span>
+                        <span className="text-gray-500 ml-2">{device.stationName} · {device.location}</span>
+                      </div>
+                      <span className={`px-1.5 py-0.5 rounded text-xs ${
+                        device.status === 'running' ? 'bg-success/20 text-success' : 'bg-gray-500/20 text-gray-400'
+                      }`}>
+                        {getStatusText(device.status)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {previewData.skippedDevices.length > 0 && (
+                <div>
+                  <p className="text-amber-400 text-sm mb-2">已跳过设备（已有待审批申请）：</p>
+                  <div className="space-y-1">
+                    {previewData.skippedDevices.map((dev, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-2 bg-amber-500/10 rounded text-xs border border-amber-500/20">
+                        <span className="text-amber-300">{dev.name}</span>
+                        <span className="text-amber-400">{dev.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="p-3 bg-primary-600/10 border border-primary-500/30 rounded-lg">
+                <p className="text-primary-300 text-sm">
+                  申请操作：<span className="font-medium">{previewData.actionName}</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => { setShowPreview(false); setPreviewData(null); }}
+                className="flex-1 py-2.5 bg-sidebar-hover text-gray-300 rounded-lg hover:bg-card-border transition-colors font-medium"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmQuickAction}
+                className="flex-1 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium flex items-center justify-center gap-2"
+              >
+                <Check className="w-4 h-4" />
+                确认提交申请
               </button>
             </div>
           </div>

@@ -15,6 +15,8 @@ const Reports = () => {
   const [exportFormat, setExportFormat] = useState('csv');
   const [isExporting, setIsExporting] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [closedLoopMonth, setClosedLoopMonth] = useState('2026-06');
+  const [closedLoopStation, setClosedLoopStation] = useState('all');
 
   const carbonOption = useMemo(() => ({
     tooltip: { trigger: 'axis', backgroundColor: '#1E293B', borderColor: '#334155', textStyle: { color: '#fff' } },
@@ -64,6 +66,7 @@ const Reports = () => {
     { key: 'ranking', label: '站点排名', icon: Trophy },
     { key: 'carbon', label: '碳排估算', icon: Leaf },
     { key: 'forecast', label: '费用预测', icon: DollarSign },
+    { key: 'closedLoop', label: '闭环追踪', icon: RefreshCw },
     { key: 'export', label: '月报导出', icon: FileSpreadsheet },
   ];
 
@@ -206,6 +209,157 @@ const Reports = () => {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  };
+
+  const closedLoopStats = useMemo(() => {
+    const filteredRequests = state.controlRequests.filter(r => {
+      if (closedLoopStation !== 'all' && !r.stationIds.includes(closedLoopStation)) return false;
+      return true;
+    });
+    const filteredAlerts = state.alerts.filter(a => {
+      if (closedLoopStation !== 'all' && a.stationId !== closedLoopStation) return false;
+      return true;
+    });
+    const filteredTasks = state.tasks.filter(t => {
+      if (closedLoopStation !== 'all' && t.stationId !== closedLoopStation) return false;
+      return true;
+    });
+
+    const totalRequests = filteredRequests.length;
+    const approvedRequests = filteredRequests.filter(r => r.status === 'approved').length;
+    const rejectedRequests = filteredRequests.filter(r => r.status === 'rejected').length;
+    const pendingRequests = filteredRequests.filter(r => r.status === 'pending').length;
+    
+    const alertsWithTask = filteredAlerts.filter(a => a.linkedTaskId).length;
+    const completedTasksFromAlerts = filteredTasks.filter(t => 
+      t.status === 'completed' && filteredAlerts.some(a => a.linkedTaskId === t.id)
+    ).length;
+    const taskCompletionRate = alertsWithTask > 0 
+      ? Math.round((completedTasksFromAlerts / alertsWithTask) * 100) 
+      : 0;
+    
+    const totalEnergySaving = filteredTasks.reduce((sum, t) => sum + t.actualSaving, 0);
+
+    return {
+      totalRequests,
+      approvedRequests,
+      rejectedRequests,
+      pendingRequests,
+      alertsWithTask,
+      completedTasksFromAlerts,
+      taskCompletionRate,
+      totalEnergySaving,
+    };
+  }, [state.controlRequests, state.alerts, state.tasks, closedLoopStation]);
+
+  const generateClosedLoopReport = () => {
+    const [year, month] = closedLoopMonth.split('-');
+    const stats = closedLoopStats;
+    const stationName = closedLoopStation === 'all' ? '全部站点' : 
+      state.devices.find(d => d.stationId === closedLoopStation)?.stationName || '未知站点';
+    
+    return {
+      month: closedLoopMonth,
+      monthLabel: `${year}年${month}月`,
+      station: stationName,
+      ...stats,
+    };
+  };
+
+  const exportClosedLoopReport = () => {
+    setIsExporting(true);
+    const data = generateClosedLoopReport();
+    
+    setTimeout(() => {
+      let content = '';
+      let fileName = '';
+      let mimeType = '';
+      
+      if (exportFormat === 'csv') {
+        content = '\ufeff';
+        content += '铁路能源管理 - 闭环追踪月报\n';
+        content += `报告月份,${data.monthLabel}\n`;
+        content += `统计站点,${data.station}\n`;
+        content += `生成时间,${new Date().toLocaleString('zh-CN')}\n\n`;
+        
+        content += '一、设备控制申请统计\n';
+        content += '指标,数值\n';
+        content += `申请总数,${data.totalRequests}\n`;
+        content += `已批准,${data.approvedRequests}\n`;
+        content += `已驳回,${data.rejectedRequests}\n`;
+        content += `待审批,${data.pendingRequests}\n\n`;
+        
+        content += '二、告警与整改联动统计\n';
+        content += '指标,数值\n';
+        content += `告警生成整改任务数,${data.alertsWithTask}\n`;
+        content += `整改任务完成数,${data.completedTasksFromAlerts}\n`;
+        content += `整改完成率,${data.taskCompletionRate}%\n\n`;
+        
+        content += '三、节能成效统计\n';
+        content += `累计节能量,${data.totalEnergySaving.toLocaleString()} kWh\n`;
+        
+        fileName = `闭环追踪月报_${data.month}.csv`;
+        mimeType = 'text/csv;charset=utf-8;';
+      } else {
+        content = '========================================\n';
+        content += '      铁路能源管理 - 闭环追踪月报\n';
+        content += '========================================\n\n';
+        content += `报告月份：${data.monthLabel}\n`;
+        content += `统计站点：${data.station}\n`;
+        content += `生成时间：${new Date().toLocaleString('zh-CN')}\n\n`;
+        
+        content += '----------------------------------------\n';
+        content += '一、设备控制申请统计\n';
+        content += '----------------------------------------\n';
+        content += `申请总数：        ${data.totalRequests}\n`;
+        content += `  已批准：        ${data.approvedRequests}\n`;
+        content += `  已驳回：        ${data.rejectedRequests}\n`;
+        content += `  待审批：        ${data.pendingRequests}\n\n`;
+        
+        content += '----------------------------------------\n';
+        content += '二、告警与整改联动统计\n';
+        content += '----------------------------------------\n';
+        content += `告警生成整改任务数：${data.alertsWithTask}\n`;
+        content += `整改任务完成数：    ${data.completedTasksFromAlerts}\n`;
+        content += `整改完成率：        ${data.taskCompletionRate}%\n\n`;
+        
+        content += '----------------------------------------\n';
+        content += '三、节能成效统计\n';
+        content += '----------------------------------------\n';
+        content += `累计节能量：${data.totalEnergySaving.toLocaleString()} kWh\n\n`;
+        
+        content += '========================================\n';
+        content += '  本报告由铁路能源管理系统自动生成\n';
+        content += '========================================\n';
+        
+        fileName = `闭环追踪月报_${data.month}.txt`;
+        mimeType = 'text/plain;charset=utf-8;';
+      }
+
+      const stationIds: string[] = [];
+      if (closedLoopStation === 'all') {
+        const stationMap = new Map<string, string>();
+        state.devices.forEach(d => stationMap.set(d.stationId, d.stationName));
+        stationIds.push(...Array.from(stationMap.keys()));
+      } else {
+        stationIds.push(closedLoopStation);
+      }
+      const stationNames = stationIds.map(id => 
+        state.devices.find(d => d.stationId === id)?.stationName || ''
+      ).filter(Boolean);
+      
+      addExportHistory({
+        stationIds,
+        stationNames,
+        month: closedLoopMonth,
+        format: exportFormat as 'csv' | 'txt',
+        fileName,
+        reportData: content,
+      });
+      
+      downloadFile(content, fileName, mimeType);
+      setIsExporting(false);
+    }, 800);
   };
 
   const exportReport = () => {
@@ -491,6 +645,109 @@ const Reports = () => {
                   <span className="text-gray-300 text-sm">电价上浮 (+0.2%)</span>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reportType === 'closedLoop' && (
+        <div className="space-y-6">
+          <div className="bg-card border border-card-border rounded-xl p-6">
+            <h3 className="text-lg font-semibold text-white mb-6 flex items-center gap-2">
+              <RefreshCw className="w-5 h-5 text-primary-400" />
+              闭环追踪统计
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div>
+                <label className="text-gray-400 text-sm block mb-2">统计月份</label>
+                <input
+                  type="month"
+                  value={closedLoopMonth}
+                  onChange={(e) => setClosedLoopMonth(e.target.value)}
+                  className="w-full bg-sidebar-hover border border-card-border rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
+                />
+              </div>
+              <div>
+                <label className="text-gray-400 text-sm block mb-2">包含站点</label>
+                <select
+                  value={closedLoopStation}
+                  onChange={(e) => setClosedLoopStation(e.target.value)}
+                  className="w-full bg-sidebar-hover border border-card-border rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
+                >
+                  <option value="all">全部站点</option>
+                  <option value="s1">北京南站</option>
+                  <option value="s2">上海虹桥站</option>
+                  <option value="s3">广州南站</option>
+                  <option value="s4">成都东站</option>
+                  <option value="s5">北京车辆段</option>
+                  <option value="s6">上海车辆段</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+              <div className="bg-sidebar-hover rounded-xl p-4 text-center">
+                <p className="text-3xl font-bold text-white">{closedLoopStats.totalRequests}</p>
+                <p className="text-gray-400 text-sm mt-1">设备控制申请</p>
+              </div>
+              <div className="bg-sidebar-hover rounded-xl p-4 text-center">
+                <p className="text-3xl font-bold text-success">{closedLoopStats.approvedRequests}</p>
+                <p className="text-gray-400 text-sm mt-1">已批准</p>
+              </div>
+              <div className="bg-sidebar-hover rounded-xl p-4 text-center">
+                <p className="text-3xl font-bold text-danger">{closedLoopStats.rejectedRequests}</p>
+                <p className="text-gray-400 text-sm mt-1">已驳回</p>
+              </div>
+              <div className="bg-sidebar-hover rounded-xl p-4 text-center">
+                <p className="text-3xl font-bold text-warning">{closedLoopStats.pendingRequests}</p>
+                <p className="text-gray-400 text-sm mt-1">待审批</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+              <div className="bg-sidebar-hover rounded-xl p-5">
+                <p className="text-gray-400 text-sm mb-2">告警生成整改任务</p>
+                <p className="text-2xl font-bold text-primary-400">{closedLoopStats.alertsWithTask}</p>
+                <p className="text-xs text-gray-500 mt-1">个任务</p>
+              </div>
+              <div className="bg-sidebar-hover rounded-xl p-5">
+                <p className="text-gray-400 text-sm mb-2">整改完成率</p>
+                <p className="text-2xl font-bold text-success">{closedLoopStats.taskCompletionRate}%</p>
+                <p className="text-xs text-gray-500 mt-1">完成 {closedLoopStats.completedTasksFromAlerts}/{closedLoopStats.alertsWithTask}</p>
+              </div>
+              <div className="bg-sidebar-hover rounded-xl p-5">
+                <p className="text-gray-400 text-sm mb-2">累计节能量</p>
+                <p className="text-2xl font-bold text-amber-400">{closedLoopStats.totalEnergySaving.toLocaleString()}</p>
+                <p className="text-xs text-gray-500 mt-1">kWh</p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-primary-500/10 border border-primary-500/30 rounded-lg">
+              <p className="text-primary-300 text-sm">
+                当前统计：<span className="font-medium">{closedLoopMonth} 月</span> · 
+                <span className="font-medium"> {closedLoopStation === 'all' ? '全部站点' : state.devices.find(d => d.stationId === closedLoopStation)?.stationName}</span>
+              </p>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={exportClosedLoopReport}
+                disabled={isExporting}
+                className="flex-1 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isExporting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    导出闭环追踪月报
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

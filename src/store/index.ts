@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { EnergyTask, Alert, Device, MeterReading, Bill, ControlRequest, ExportHistory } from '../types';
+import type { EnergyTask, Alert, Device, MeterReading, Bill, ControlRequest, ExportHistory, DeviceSnapshot, ProgressHistoryItem } from '../types';
 import { energyTasks as initialTasks, alerts as initialAlerts, devices as initialDevices, meterReadings as initialReadings, bills as initialBills } from '../data/mockData';
 
 const STORAGE_KEY = 'railway_energy_state';
@@ -118,6 +118,18 @@ export const useStore = () => {
       return device?.name || '未知设备';
     });
 
+    const deviceSnapshots: DeviceSnapshot[] = validDeviceIds.map(id => {
+      const device = globalState.devices.find(d => d.id === id);
+      return {
+        id: device?.id || id,
+        name: device?.name || '未知设备',
+        stationId: device?.stationId || '',
+        stationName: device?.stationName || '',
+        location: device?.location || '',
+        status: device?.status || 'stopped',
+      };
+    });
+
     const stationIds = [...new Set(validDeviceIds.map(id => {
       const device = globalState.devices.find(d => d.id === id);
       return device?.stationId || '';
@@ -138,6 +150,7 @@ export const useStore = () => {
       createTime: new Date().toLocaleString('zh-CN'),
       status: 'pending',
       skippedDevices: skippedDevices.length > 0 ? skippedDevices : undefined,
+      deviceSnapshots,
     };
     setState(state => ({
       ...state,
@@ -152,29 +165,40 @@ export const useStore = () => {
     return newRequest;
   }, []);
 
-  const updateTaskProgress = useCallback((taskId: string, completedAmount: number, progressPercent: number, remark?: string) => {
+  const updateTaskProgress = useCallback((taskId: string, completedAmount: number, progressPercent: number, remark?: string, completionNote?: string, updatedBy: string = '张工') => {
     const newProgress = Math.min(100, Math.max(0, progressPercent));
     const newTaskStatus = newProgress >= 100 ? 'completed' as const : 
                          newProgress > 0 ? 'in_progress' as const : undefined;
+    
+    const historyItem: ProgressHistoryItem = {
+      id: `ph${Date.now()}`,
+      progressPercent: newProgress,
+      completedAmount,
+      remark,
+      updateTime: new Date().toLocaleString('zh-CN'),
+      updatedBy,
+    };
     
     setState(state => ({
       ...state,
       tasks: state.tasks.map(t => {
         if (t.id === taskId) {
           const finalStatus = newTaskStatus || t.status;
+          const existingHistory = t.progressHistory || [];
           return {
             ...t,
             actualSaving: completedAmount,
             progress: newProgress,
             status: finalStatus,
+            progressHistory: [historyItem, ...existingHistory],
+            completionNote: finalStatus === 'completed' ? (completionNote || t.completionNote) : t.completionNote,
           };
         }
         return t;
       }),
       alerts: state.alerts.map(a => {
         if (a.linkedTaskId === taskId) {
-          const task = state.tasks.find(t => t.id === taskId);
-          const finalTaskStatus = newTaskStatus || task?.status;
+          const finalTaskStatus = newTaskStatus;
           return {
             ...a,
             linkedTaskStatus: finalTaskStatus,
@@ -183,6 +207,87 @@ export const useStore = () => {
         return a;
       }),
     }));
+  }, []);
+
+  const batchApproveRequests = useCallback((requestIds: string[], approver: string, remark?: string) => {
+    const now = new Date().toLocaleString('zh-CN');
+    setState(state => {
+      const updatedDevices: string[] = [];
+      const newRequests = state.controlRequests.map(r => {
+        if (requestIds.includes(r.id) && r.status === 'pending') {
+          r.deviceIds.forEach(id => {
+            if (!updatedDevices.includes(id)) updatedDevices.push(id);
+          });
+          return {
+            ...r,
+            status: 'approved' as const,
+            approver,
+            approveRemark: remark,
+            approveTime: now,
+          };
+        }
+        return r;
+      });
+
+      const newDevices = state.devices.map(d => {
+        if (updatedDevices.includes(d.id)) {
+          const request = state.controlRequests.find(r => 
+            requestIds.includes(r.id) && r.deviceIds.includes(d.id)
+          );
+          let newStatus = d.status;
+          if (request) {
+            if (request.action === 'start') {
+              newStatus = 'running';
+            } else if (['stop', 'batch_off', 'timed_off', 'temp_down', 'temp_up'].includes(request.action)) {
+              newStatus = 'stopped';
+            }
+          }
+          return { ...d, controlRequestStatus: undefined, status: newStatus };
+        }
+        return d;
+      });
+
+      return {
+        ...state,
+        controlRequests: newRequests,
+        devices: newDevices,
+      };
+    });
+  }, []);
+
+  const batchRejectRequests = useCallback((requestIds: string[], approver: string, remark?: string) => {
+    const now = new Date().toLocaleString('zh-CN');
+    setState(state => {
+      const updatedDevices: string[] = [];
+      const newRequests = state.controlRequests.map(r => {
+        if (requestIds.includes(r.id) && r.status === 'pending') {
+          r.deviceIds.forEach(id => {
+            if (!updatedDevices.includes(id)) updatedDevices.push(id);
+          });
+          return {
+            ...r,
+            status: 'rejected' as const,
+            approver,
+            approveRemark: remark,
+            approveTime: now,
+          };
+        }
+        return r;
+      });
+
+      const newDevices = state.devices.map(d => {
+        if (updatedDevices.includes(d.id)) {
+          return { ...d, controlRequestStatus: undefined };
+        }
+        return d;
+      });
+
+      return {
+        ...state,
+        controlRequests: newRequests,
+        devices: newDevices,
+      };
+    });
   }, []);
 
   const approveControlRequest = useCallback((requestId: string, approver: string, remark?: string) => {
@@ -246,7 +351,7 @@ export const useStore = () => {
     }));
   }, []);
 
-  const createTaskFromAlert = useCallback((alertId: string, taskData: Omit<EnergyTask, 'id' | 'actualSaving' | 'progress' | 'status'>) => {
+  const createTaskFromAlert = useCallback((alertId: string, taskData: Omit<EnergyTask, 'id' | 'actualSaving' | 'progress' | 'status' | 'progressHistory'>) => {
     const taskId = `t${Date.now()}`;
     setState(state => ({
       ...state,
@@ -257,6 +362,7 @@ export const useStore = () => {
           actualSaving: 0,
           progress: 0,
           status: 'pending',
+          progressHistory: [],
         },
         ...state.tasks,
       ],
@@ -264,13 +370,10 @@ export const useStore = () => {
         if (a.id === alertId) {
           return {
             ...a,
-            status: 'processing' as const,
+            status: a.status === 'pending' ? 'processing' as const : a.status,
             linkedTaskId: taskId,
             linkedTaskTitle: taskData.title,
             linkedTaskStatus: 'pending',
-            handler: a.handler || '张工',
-            remark: a.remark ? `${a.remark}；已生成整改任务` : '已生成整改任务',
-            resolvedAt: a.resolvedAt,
           };
         }
         return a;
@@ -331,5 +434,7 @@ export const useStore = () => {
     rejectControlRequest,
     createTaskFromAlert,
     addExportHistory,
+    batchApproveRequests,
+    batchRejectRequests,
   };
 };

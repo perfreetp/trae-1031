@@ -54,6 +54,15 @@ export interface Alert {
   linkedTaskStatus?: EnergyTask['status'];
 }
 
+export interface DeviceSnapshot {
+  id: string;
+  name: string;
+  stationId: string;
+  stationName: string;
+  location: string;
+  status: 'running' | 'stopped' | 'fault';
+}
+
 export interface ControlRequest {
   id: string;
   deviceIds: string[];
@@ -70,6 +79,16 @@ export interface ControlRequest {
   approver?: string;
   approveRemark?: string;
   approveTime?: string;
+  deviceSnapshots?: DeviceSnapshot[];
+}
+
+export interface ProgressHistoryItem {
+  id: string;
+  progressPercent: number;
+  completedAmount: number;
+  remark?: string;
+  updateTime: string;
+  updatedBy: string;
 }
 
 export interface EnergyTask {
@@ -85,6 +104,8 @@ export interface EnergyTask {
   actualSaving: number;
   status: 'pending' | 'in_progress' | 'completed' | 'overdue';
   progress: number;
+  progressHistory?: ProgressHistoryItem[];
+  completionNote?: string;
 }
 
 export interface MeterReading {

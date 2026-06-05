@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
-import { Target, Plus, Calendar, User as UserIcon, TrendingUp, CheckCircle, Clock, AlertCircle, Filter, Edit, Save } from 'lucide-react';
+import { Target, Plus, Calendar, User as UserIcon, TrendingUp, CheckCircle, Clock, AlertCircle, Filter, Edit, Save, ChevronDown, ChevronRight, History, FileText } from 'lucide-react';
 import { useStore } from '../../store';
 import type { EnergyTask } from '../../types';
 
@@ -10,10 +10,12 @@ const EnergyPlan = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showProgressModal, setShowProgressModal] = useState(false);
   const [selectedTask, setSelectedTask] = useState<EnergyTask | null>(null);
+  const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [progressForm, setProgressForm] = useState({
     completedAmount: 0,
     progressPercent: 0,
     remark: '',
+    completionNote: '',
   });
   const [formData, setFormData] = useState({
     title: '',
@@ -117,6 +119,7 @@ const EnergyPlan = () => {
       completedAmount: task.actualSaving,
       progressPercent: task.progress,
       remark: '',
+      completionNote: task.completionNote || '',
     });
     setShowProgressModal(true);
   };
@@ -127,10 +130,20 @@ const EnergyPlan = () => {
       alert('进度百分比必须在 0-100 之间');
       return;
     }
-    updateTaskProgress(selectedTask.id, progressForm.completedAmount, progressForm.progressPercent, progressForm.remark || undefined);
+    if (progressForm.progressPercent >= 100 && !progressForm.completionNote.trim()) {
+      alert('进度达到 100% 时必须填写完成说明');
+      return;
+    }
+    updateTaskProgress(
+      selectedTask.id, 
+      progressForm.completedAmount, 
+      progressForm.progressPercent, 
+      progressForm.remark || undefined,
+      progressForm.progressPercent >= 100 ? progressForm.completionNote : undefined
+    );
     setShowProgressModal(false);
     setSelectedTask(null);
-    setProgressForm({ completedAmount: 0, progressPercent: 0, remark: '' });
+    setProgressForm({ completedAmount: 0, progressPercent: 0, remark: '', completionNote: '' });
   };
 
   const handlePercentChange = (value: number) => {
@@ -153,6 +166,14 @@ const EnergyPlan = () => {
       completedAmount: amount,
       progressPercent: percent,
     });
+  };
+
+  const toggleExpand = (id: string) => {
+    setExpandedTask(expandedTask === id ? null : id);
+  };
+
+  const formatHistoryDate = (dateStr: string) => {
+    return dateStr;
   };
 
   return (
@@ -241,59 +262,118 @@ const EnergyPlan = () => {
 
           <div className="space-y-3">
             {filteredTasks.map((task) => (
-              <div key={task.id} className="bg-card border border-card-border rounded-xl p-5 hover:border-primary-500/50 transition-all">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-white font-semibold">{task.title}</h4>
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(task.status)}`}>
-                        {getStatusLabel(task.status)}
-                      </span>
+              <div key={task.id} className="bg-card border border-card-border rounded-xl overflow-hidden hover:border-primary-500/50 transition-all">
+                <div 
+                  className="p-5 cursor-pointer"
+                  onClick={() => toggleExpand(task.id)}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-start gap-3">
+                      <button className="mt-1 text-gray-400 hover:text-white">
+                        {expandedTask === task.id ? 
+                          <ChevronDown className="w-5 h-5" /> : 
+                          <ChevronRight className="w-5 h-5" />
+                        }
+                      </button>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-white font-semibold">{task.title}</h4>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(task.status)}`}>
+                            {getStatusLabel(task.status)}
+                          </span>
+                        </div>
+                        <p className="text-gray-400 text-sm mt-1">{task.description}</p>
+                      </div>
                     </div>
-                    <p className="text-gray-400 text-sm mt-1">{task.description}</p>
+                    {task.status !== 'completed' && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleOpenProgress(task); }}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-primary-600/20 text-primary-400 text-sm rounded-lg hover:bg-primary-600/30 transition-colors"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                        更新进展
+                      </button>
+                    )}
                   </div>
-                  {task.status !== 'completed' && (
-                    <button
-                      onClick={() => handleOpenProgress(task)}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-primary-600/20 text-primary-400 text-sm rounded-lg hover:bg-primary-600/30 transition-colors"
-                    >
-                      <Edit className="w-3.5 h-3.5" />
-                      更新进展
-                    </button>
-                  )}
+
+                  <div className="flex items-center gap-4 text-sm text-gray-400 mb-3">
+                    <span className="flex items-center gap-1">
+                      <UserIcon className="w-3.5 h-3.5" />
+                      {task.assignee}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5" />
+                      {task.startDate} ~ {task.endDate}
+                    </span>
+                    <span>{task.stationName}</span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-400">任务进度</span>
+                      <span className="text-white font-mono">{task.progress}%</span>
+                    </div>
+                    <div className="h-2 bg-sidebar-hover rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          task.status === 'completed' ? 'bg-success' :
+                          task.status === 'overdue' ? 'bg-danger' : 'bg-primary-500'
+                        }`}
+                        style={{ width: `${task.progress}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">目标: {task.targetSaving.toLocaleString()} kWh</span>
+                      <span className="text-success">已完成: {task.actualSaving.toLocaleString()} kWh</span>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-4 text-sm text-gray-400 mb-3">
-                  <span className="flex items-center gap-1">
-                    <UserIcon className="w-3.5 h-3.5" />
-                    {task.assignee}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5" />
-                    {task.startDate} ~ {task.endDate}
-                  </span>
-                  <span>{task.stationName}</span>
-                </div>
+                {expandedTask === task.id && (
+                  <div className="border-t border-card-border p-5 bg-sidebar-hover/30 space-y-4">
+                    <div>
+                      <p className="text-gray-400 text-sm mb-3 flex items-center gap-2">
+                        <History className="w-4 h-4" />
+                        进度更新记录
+                      </p>
+                      {task.progressHistory && task.progressHistory.length > 0 ? (
+                        <div className="space-y-3 max-h-64 overflow-y-auto">
+                          {task.progressHistory.map((item) => (
+                            <div key={item.id} className="flex gap-3 p-3 bg-sidebar-hover rounded-lg">
+                              <div className="flex-shrink-0 w-20">
+                                <p className="text-primary-400 font-bold">{item.progressPercent}%</p>
+                                <p className="text-xs text-gray-500">{item.completedAmount} kWh</p>
+                              </div>
+                              <div className="flex-1">
+                                {item.remark && (
+                                  <p className="text-gray-300 text-sm">{item.remark}</p>
+                                )}
+                                <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                                  <span>{item.updateTime}</span>
+                                  <span>更新人：{item.updatedBy}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-gray-500 text-sm">暂无进度更新记录</p>
+                      )}
+                    </div>
 
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-400">任务进度</span>
-                    <span className="text-white font-mono">{task.progress}%</span>
+                    {task.completionNote && (
+                      <div>
+                        <p className="text-gray-400 text-sm mb-2 flex items-center gap-2">
+                          <FileText className="w-4 h-4" />
+                          完成说明
+                        </p>
+                        <p className="text-gray-300 text-sm p-3 bg-success/10 border border-success/30 rounded-lg">
+                          {task.completionNote}
+                        </p>
+                      </div>
+                    )}
                   </div>
-                  <div className="h-2 bg-sidebar-hover rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        task.status === 'completed' ? 'bg-success' :
-                        task.status === 'overdue' ? 'bg-danger' : 'bg-primary-500'
-                      }`}
-                      style={{ width: `${task.progress}%` }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">目标: {task.targetSaving.toLocaleString()} kWh</span>
-                    <span className="text-success">已完成: {task.actualSaving.toLocaleString()} kWh</span>
-                  </div>
-                </div>
+                )}
               </div>
             ))}
           </div>
@@ -464,7 +544,7 @@ const EnergyPlan = () => {
 
       {showProgressModal && selectedTask && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-card border border-card-border rounded-xl p-6 w-full max-w-md shadow-2xl">
+          <div className="bg-card border border-card-border rounded-xl p-6 w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-bold text-white mb-4">更新任务进展</h3>
             <div className="mb-4 p-3 bg-sidebar-hover rounded-lg">
               <p className="text-white font-medium">{selectedTask.title}</p>
@@ -491,7 +571,7 @@ const EnergyPlan = () => {
                 </div>
               </div>
               <div>
-                <label className="text-gray-400 text-sm block mb-2">本次完成节能 (kWh)</label>
+                <label className="text-gray-400 text-sm block mb-2">累计完成节能 (kWh)</label>
                 <input
                   type="number"
                   value={progressForm.completedAmount || ''}
@@ -506,15 +586,30 @@ const EnergyPlan = () => {
                 </p>
               </div>
               <div>
-                <label className="text-gray-400 text-sm block mb-2">备注说明（可选）</label>
+                <label className="text-gray-400 text-sm block mb-2">进展说明（可选）</label>
                 <textarea
                   value={progressForm.remark}
                   onChange={(e) => setProgressForm({ ...progressForm, remark: e.target.value })}
                   className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500 resize-none"
                   rows={2}
-                  placeholder="请输入本次更新的说明"
+                  placeholder="请输入本次进度更新的说明"
                 />
               </div>
+              {progressForm.progressPercent >= 100 && (
+                <div>
+                  <label className="text-gray-400 text-sm block mb-2">
+                    完成说明 <span className="text-danger">*</span>
+                  </label>
+                  <textarea
+                    value={progressForm.completionNote}
+                    onChange={(e) => setProgressForm({ ...progressForm, completionNote: e.target.value })}
+                    className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500 resize-none"
+                    rows={3}
+                    placeholder="请填写任务完成说明"
+                  />
+                  <p className="text-xs text-danger mt-1">进度达到 100% 时必须填写完成说明</p>
+                </div>
+              )}
               {progressForm.progressPercent >= 100 && (
                 <div className="p-3 bg-success/10 border border-success/30 rounded-lg">
                   <p className="text-success text-sm flex items-center gap-2">
