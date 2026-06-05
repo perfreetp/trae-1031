@@ -31,6 +31,7 @@ export interface Device {
   runHours: number;
   todayEnergy: number;
   lastMaintenance: string;
+  controlRequestStatus?: 'pending' | 'approved' | 'rejected';
 }
 
 export interface Alert {
@@ -44,9 +45,22 @@ export interface Alert {
   value: number;
   threshold: number;
   timestamp: string;
-  status: 'pending' | 'processing' | 'resolved';
+  status: 'pending' | 'processing' | 'resolved' | 'false_alarm';
   handler?: string;
   resolvedAt?: string;
+  remark?: string;
+}
+
+export interface ControlRequest {
+  id: string;
+  deviceIds: string[];
+  deviceNames: string[];
+  action: 'start' | 'stop' | 'temp_up' | 'temp_down' | 'timed_off';
+  actionName: string;
+  applicant: string;
+  createTime: string;
+  status: 'pending' | 'approved' | 'rejected';
+  remark?: string;
 }
 
 export interface EnergyTask {

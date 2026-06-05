@@ -1,28 +1,32 @@
 import { useState, useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
-import { AlertTriangle, AlertCircle, CheckCircle, Clock, Filter, User, Check, X, MessageSquare, TrendingUp, Droplets } from 'lucide-react';
-import { alerts } from '../../data/mockData';
+import { AlertTriangle, AlertCircle, CheckCircle, Clock, Filter, User, Check, X, MessageSquare, TrendingUp, Droplets, Flag } from 'lucide-react';
+import { useStore } from '../../store';
 import type { Alert } from '../../types';
 
 const Alerts = () => {
+  const { state, updateAlertStatus } = useStore();
   const [filterLevel, setFilterLevel] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
+  const [actionType, setActionType] = useState<'process' | 'resolve' | 'false_alarm'>('process');
+  const [handler, setHandler] = useState('张工');
+  const [remark, setRemark] = useState('');
 
   const filteredAlerts = useMemo(() => {
-    return alerts.filter(a => {
+    return state.alerts.filter(a => {
       if (filterLevel !== 'all' && a.level !== filterLevel) return false;
       if (filterStatus !== 'all' && a.status !== filterStatus) return false;
       return true;
     });
-  }, [filterLevel, filterStatus]);
+  }, [state.alerts, filterLevel, filterStatus]);
 
   const stats = useMemo(() => ({
-    total: alerts.length,
-    pending: alerts.filter(a => a.status === 'pending').length,
-    processing: alerts.filter(a => a.status === 'processing').length,
-    resolved: alerts.filter(a => a.status === 'resolved').length,
-  }), []);
+    total: state.alerts.length,
+    pending: state.alerts.filter(a => a.status === 'pending').length,
+    processing: state.alerts.filter(a => a.status === 'processing').length,
+    resolved: state.alerts.filter(a => a.status === 'resolved').length,
+  }), [state.alerts]);
 
   const typeDistributionOption = useMemo(() => ({
     tooltip: { trigger: 'item', backgroundColor: '#1E293B', borderColor: '#334155', textStyle: { color: '#fff' } },
@@ -34,13 +38,13 @@ const Alerts = () => {
       itemStyle: { borderRadius: 8, borderColor: '#1E293B', borderWidth: 2 },
       label: { show: false },
       data: [
-        { value: alerts.filter(a => a.type === 'energy_fluctuation').length, name: '能耗波动', itemStyle: { color: '#F59E0B' } },
-        { value: alerts.filter(a => a.type === 'water_leak').length, name: '漏水疑似', itemStyle: { color: '#3B82F6' } },
-        { value: alerts.filter(a => a.type === 'device_fault').length, name: '设备故障', itemStyle: { color: '#EF4444' } },
-        { value: alerts.filter(a => a.type === 'over_limit').length, name: '用量超限', itemStyle: { color: '#8B5CF6' } },
+        { value: state.alerts.filter(a => a.type === 'energy_fluctuation').length, name: '能耗波动', itemStyle: { color: '#F59E0B' } },
+        { value: state.alerts.filter(a => a.type === 'water_leak').length, name: '漏水疑似', itemStyle: { color: '#3B82F6' } },
+        { value: state.alerts.filter(a => a.type === 'device_fault').length, name: '设备故障', itemStyle: { color: '#EF4444' } },
+        { value: state.alerts.filter(a => a.type === 'over_limit').length, name: '用量超限', itemStyle: { color: '#8B5CF6' } },
       ],
     }],
-  }), []);
+  }), [state.alerts]);
 
   const getLevelColor = (level: string) => {
     switch (level) {
@@ -63,6 +67,7 @@ const Alerts = () => {
       case 'pending': return 'bg-warning/20 text-warning';
       case 'processing': return 'bg-primary-500/20 text-primary-400';
       case 'resolved': return 'bg-success/20 text-success';
+      case 'false_alarm': return 'bg-gray-500/20 text-gray-400';
       default: return 'bg-gray-500/20 text-gray-400';
     }
   };
@@ -72,6 +77,7 @@ const Alerts = () => {
       case 'pending': return '待处理';
       case 'processing': return '处理中';
       case 'resolved': return '已解决';
+      case 'false_alarm': return '误报';
       default: return '未知';
     }
   };
@@ -86,8 +92,42 @@ const Alerts = () => {
     }
   };
 
-  const handleProcess = (alert: Alert) => {
+  const handleProcess = (alert: Alert, action: 'process' | 'resolve' | 'false_alarm') => {
     setSelectedAlert(alert);
+    setActionType(action);
+    setRemark('');
+  };
+
+  const handleConfirm = () => {
+    if (!selectedAlert) return;
+    
+    let newStatus: Alert['status'];
+    switch (actionType) {
+      case 'process':
+        newStatus = 'processing';
+        break;
+      case 'resolve':
+        newStatus = 'resolved';
+        break;
+      case 'false_alarm':
+        newStatus = 'false_alarm';
+        break;
+      default:
+        newStatus = 'processing';
+    }
+    
+    updateAlertStatus(selectedAlert.id, newStatus, handler, remark);
+    setSelectedAlert(null);
+    setRemark('');
+  };
+
+  const getModalTitle = () => {
+    switch (actionType) {
+      case 'process': return '处理告警';
+      case 'resolve': return '结案确认';
+      case 'false_alarm': return '标记误报';
+      default: return '处理告警';
+    }
   };
 
   return (
@@ -170,6 +210,7 @@ const Alerts = () => {
               <option value="pending">待处理</option>
               <option value="processing">处理中</option>
               <option value="resolved">已解决</option>
+              <option value="false_alarm">误报</option>
             </select>
           </div>
 
@@ -192,7 +233,7 @@ const Alerts = () => {
                     </div>
                     <h4 className="text-white font-medium mt-2">{alert.stationName} - {alert.location}</h4>
                     <p className="text-gray-400 text-sm mt-1">{alert.description}</p>
-                    <div className="flex items-center gap-4 mt-3 text-sm">
+                    <div className="flex flex-wrap items-center gap-4 mt-3 text-sm">
                       <span className="text-gray-500">当前值: <span className="text-white font-mono">{alert.value}</span></span>
                       <span className="text-gray-500">阈值: <span className="text-white font-mono">{alert.threshold}</span></span>
                       {alert.handler && (
@@ -201,21 +242,38 @@ const Alerts = () => {
                           处理人: <span className="text-white">{alert.handler}</span>
                         </span>
                       )}
+                      {alert.resolvedAt && (
+                        <span className="text-gray-500">处理时间: <span className="text-white">{alert.resolvedAt}</span></span>
+                      )}
                     </div>
+                    {alert.remark && (
+                      <div className="mt-2 p-2 bg-sidebar-hover rounded-lg">
+                        <p className="text-xs text-gray-400">处理说明: <span className="text-gray-300">{alert.remark}</span></p>
+                      </div>
+                    )}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-col gap-2">
                     {alert.status === 'pending' && (
-                      <button
-                        onClick={() => handleProcess(alert)}
-                        className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium flex items-center gap-1"
-                      >
-                        <Check className="w-4 h-4" />
-                        处理
-                      </button>
+                      <>
+                        <button
+                          onClick={() => handleProcess(alert, 'process')}
+                          className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-sm font-medium flex items-center gap-1"
+                        >
+                          <Check className="w-4 h-4" />
+                          处理
+                        </button>
+                        <button
+                          onClick={() => handleProcess(alert, 'false_alarm')}
+                          className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm font-medium flex items-center gap-1"
+                        >
+                          <Flag className="w-4 h-4" />
+                          误报
+                        </button>
+                      </>
                     )}
                     {alert.status === 'processing' && (
                       <button
-                        onClick={() => handleProcess(alert)}
+                        onClick={() => handleProcess(alert, 'resolve')}
                         className="px-4 py-2 bg-success text-white rounded-lg hover:bg-success/90 transition-colors text-sm font-medium flex items-center gap-1"
                       >
                         <CheckCircle className="w-4 h-4" />
@@ -275,9 +333,19 @@ const Alerts = () => {
                 <MessageSquare className="w-5 h-5 text-warning" />
                 <span className="text-warning font-medium">批量派单处理</span>
               </button>
-              <button className="w-full flex items-center gap-3 p-3 bg-sidebar-hover border border-card-border rounded-lg hover:border-primary-500/50 transition-colors">
+              <button
+                onClick={() => {
+                  const pendingAlerts = state.alerts.filter(a => a.status === 'pending');
+                  if (pendingAlerts.length > 0) {
+                    pendingAlerts.forEach(alert => {
+                      updateAlertStatus(alert.id, 'false_alarm', '系统', '批量标记为误报');
+                    });
+                  }
+                }}
+                className="w-full flex items-center gap-3 p-3 bg-sidebar-hover border border-card-border rounded-lg hover:border-primary-500/50 transition-colors"
+              >
                 <X className="w-5 h-5 text-gray-400" />
-                <span className="text-gray-300 font-medium">标记误报</span>
+                <span className="text-gray-300 font-medium">标记全部误报</span>
               </button>
             </div>
           </div>
@@ -288,22 +356,39 @@ const Alerts = () => {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="bg-card border border-card-border rounded-xl p-6 w-full max-w-lg shadow-2xl">
             <h3 className="text-xl font-bold text-white mb-4">
-              {selectedAlert.status === 'pending' ? '处理告警' : '结案确认'}
+              {getModalTitle()}
             </h3>
             <div className="bg-sidebar-hover rounded-lg p-4 mb-4">
               <p className="text-gray-400 text-sm">告警内容</p>
               <p className="text-white mt-1">{selectedAlert.description}</p>
               <p className="text-gray-500 text-sm mt-2">{selectedAlert.stationName} - {selectedAlert.location}</p>
             </div>
-            <div className="mb-4">
-              <label className="text-gray-400 text-sm block mb-2">处理说明</label>
-              <textarea
-                className="w-full bg-sidebar-hover border border-card-border rounded-lg p-3 text-white text-sm focus:outline-none focus:border-primary-500 resize-none"
-                rows={3}
-                placeholder="请输入处理说明..."
-              />
+            <div className="space-y-4">
+              <div>
+                <label className="text-gray-400 text-sm block mb-2">处理人</label>
+                <select
+                  value={handler}
+                  onChange={(e) => setHandler(e.target.value)}
+                  className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                >
+                  <option value="张工">张工</option>
+                  <option value="李工">李工</option>
+                  <option value="王工">王工</option>
+                  <option value="赵工">赵工</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-gray-400 text-sm block mb-2">处理说明</label>
+                <textarea
+                  value={remark}
+                  onChange={(e) => setRemark(e.target.value)}
+                  className="w-full bg-sidebar-hover border border-card-border rounded-lg p-3 text-white text-sm focus:outline-none focus:border-primary-500 resize-none"
+                  rows={3}
+                  placeholder="请输入处理说明..."
+                />
+              </div>
             </div>
-            <div className="flex gap-3">
+            <div className="flex gap-3 mt-6">
               <button
                 onClick={() => setSelectedAlert(null)}
                 className="flex-1 py-2.5 bg-sidebar-hover text-gray-300 rounded-lg hover:bg-card-border transition-colors font-medium"
@@ -311,11 +396,14 @@ const Alerts = () => {
                 取消
               </button>
               <button
-                onClick={() => {
-                  alert('处理成功！');
-                  setSelectedAlert(null);
-                }}
-                className="flex-1 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium"
+                onClick={handleConfirm}
+                className={`flex-1 py-2.5 rounded-lg font-medium transition-colors ${
+                  actionType === 'resolve'
+                    ? 'bg-success text-white hover:bg-success/90'
+                    : actionType === 'false_alarm'
+                    ? 'bg-gray-600 text-white hover:bg-gray-700'
+                    : 'bg-primary-600 text-white hover:bg-primary-700'
+                }`}
               >
                 确认
               </button>

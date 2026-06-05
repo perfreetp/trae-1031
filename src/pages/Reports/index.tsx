@@ -1,12 +1,18 @@
 import { useState, useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
 import * as echarts from 'echarts';
-import { BarChart3, Download, Calendar, TrendingUp, Leaf, DollarSign, Trophy, FileSpreadsheet, Filter } from 'lucide-react';
-import { stationRanking, carbonData, costForecast, energyTrendData } from '../../data/mockData';
+import { BarChart3, Download, Calendar, TrendingUp, Leaf, DollarSign, Trophy, FileSpreadsheet, Filter, Check } from 'lucide-react';
+import { stationRanking, carbonData, costForecast } from '../../data/mockData';
+import { useStore } from '../../store';
 
 const Reports = () => {
+  const { state } = useStore();
   const [reportType, setReportType] = useState('ranking');
   const [timeRange, setTimeRange] = useState('month');
+  const [exportMonth, setExportMonth] = useState('2026-06');
+  const [selectedStation, setSelectedStation] = useState('all');
+  const [exportFormat, setExportFormat] = useState('csv');
+  const [isExporting, setIsExporting] = useState(false);
 
   const carbonOption = useMemo(() => ({
     tooltip: { trigger: 'axis', backgroundColor: '#1E293B', borderColor: '#334155', textStyle: { color: '#fff' } },
@@ -16,8 +22,8 @@ const Reports = () => {
     yAxis: { type: 'value', name: 'tCO₂', axisLine: { lineStyle: { color: '#334155' } }, axisLabel: { color: '#9CA3AF' }, splitLine: { lineStyle: { color: '#1E293B' } } },
     series: [
       { name: '用电碳排放', type: 'bar', stack: 'total', data: carbonData.map(c => Math.round(c.electricityCarbon)), itemStyle: { color: '#3B82F6' }, barWidth: '40%' },
-      { name: '用水碳排放', type: 'bar', stack: 'total', data: carbonData.map(c => Math.round(c.waterCarbon)), itemStyle: { color: '#10B981' } },
-      { name: '用气碳排放', type: 'bar', stack: 'total', data: carbonData.map(c => Math.round(c.gasCarbon)), itemStyle: { color: '#F59E0B' } },
+      { name: '用水碳排放', type: 'bar', stack: 'total', data: carbonData.map(c => Math.round(c.waterCarbon)), itemStyle: { color: '#10B981' }, barWidth: '40%' },
+      { name: '用气碳排放', type: 'bar', stack: 'total', data: carbonData.map(c => Math.round(c.gasCarbon)), itemStyle: { color: '#F59E0B' }, barWidth: '40%' },
     ],
   }), []);
 
@@ -58,6 +64,149 @@ const Reports = () => {
     { key: 'forecast', label: '费用预测', icon: DollarSign },
     { key: 'export', label: '月报导出', icon: FileSpreadsheet },
   ];
+
+  const generateReportData = () => {
+    const stations = selectedStation === 'all' 
+      ? stationRanking 
+      : stationRanking.filter(s => s.name.includes(selectedStation.replace('站', '')));
+    
+    const [year, month] = exportMonth.split('-');
+    
+    const totalElectricity = stations.reduce((sum, s) => sum + s.area * 12.35, 0);
+    const totalWater = stations.reduce((sum, s) => sum + s.area * 0.85, 0);
+    const totalGas = stations.reduce((sum, s) => sum + s.area * 1.2, 0);
+    
+    const electricityCost = totalElectricity * 0.85;
+    const waterCost = totalWater * 5.2;
+    const gasCost = totalGas * 3.8;
+    const totalCost = electricityCost + waterCost + gasCost;
+    
+    const totalCarbon = stations.reduce((sum, s) => sum + s.area * 0.15, 0);
+    
+    const sortedStations = [...stations].sort((a, b) => a.intensity - b.intensity);
+    
+    return {
+      month: exportMonth,
+      monthLabel: `${year}年${month}月`,
+      stations: stations.map(s => s.name).join('、'),
+      totalElectricity: Math.round(totalElectricity),
+      totalWater: Math.round(totalWater * 10) / 10,
+      totalGas: Math.round(totalGas * 10) / 10,
+      electricityCost: Math.round(electricityCost),
+      waterCost: Math.round(waterCost),
+      gasCost: Math.round(gasCost),
+      totalCost: Math.round(totalCost),
+      forecastCost: Math.round(totalCost * (1 - costForecast.trend / 100)),
+      totalCarbon: Math.round(totalCarbon * 1000),
+      rankings: sortedStations.map((s, idx) => ({
+        rank: idx + 1,
+        name: s.name,
+        type: s.type === 'station' ? '车站' : '车辆段',
+        area: s.area,
+        intensity: s.intensity.toFixed(2),
+        savingRate: s.savingRate.toFixed(1),
+      })),
+    };
+  };
+
+  const exportReport = () => {
+    setIsExporting(true);
+    const data = generateReportData();
+    
+    setTimeout(() => {
+      if (exportFormat === 'csv') {
+        let csvContent = '\ufeff';
+        csvContent += '铁路能源管理月度报告\n';
+        csvContent += `报告月份,${data.monthLabel}\n`;
+        csvContent += `统计站点,${data.stations}\n`;
+        csvContent += `生成时间,${new Date().toLocaleString('zh-CN')}\n\n`;
+        
+        csvContent += '一、能耗汇总\n';
+        csvContent += '类别,用量,单位,费用(元)\n';
+        csvContent += `用电,${data.totalElectricity.toLocaleString()},kWh,${data.electricityCost.toLocaleString()}\n`;
+        csvContent += `用水,${data.totalWater.toLocaleString()},m³,${data.waterCost.toLocaleString()}\n`;
+        csvContent += `用气,${data.totalGas.toLocaleString()},m³,${data.gasCost.toLocaleString()}\n`;
+        csvContent += `合计,-,-,${data.totalCost.toLocaleString()}\n\n`;
+        
+        csvContent += '二、费用预测\n';
+        csvContent += `下月预测费用,${data.forecastCost.toLocaleString()}元\n`;
+        csvContent += `预测趋势,较本月下降 ${costForecast.trend}%\n\n`;
+        
+        csvContent += '三、碳排放估算\n';
+        csvContent += `本月碳排放总量,${data.totalCarbon.toLocaleString()} kgCO₂\n`;
+        csvContent += `折算种树,约 ${Math.round(data.totalCarbon / 18)} 棵\n\n`;
+        
+        csvContent += '四、同类站点能效排名\n';
+        csvContent += '排名,站点名称,类型,建筑面积(㎡),能效指标(kWh/百㎡),节能率(%)\n';
+        data.rankings.forEach(r => {
+          csvContent += `${r.rank},${r.name},${r.type},${r.area.toLocaleString()},${r.intensity},${r.savingRate}\n`;
+        });
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `铁路能源月报_${data.month}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        let txtContent = '========================================\n';
+        txtContent += '       铁路能源管理月度报告\n';
+        txtContent += '========================================\n\n';
+        txtContent += `报告月份：${data.monthLabel}\n`;
+        txtContent += `统计站点：${data.stations}\n`;
+        txtContent += `生成时间：${new Date().toLocaleString('zh-CN')}\n\n`;
+        
+        txtContent += '----------------------------------------\n';
+        txtContent += '一、能耗汇总\n';
+        txtContent += '----------------------------------------\n';
+        txtContent += `用电：${data.totalElectricity.toLocaleString()} kWh  费用：¥${data.electricityCost.toLocaleString()}\n`;
+        txtContent += `用水：${data.totalWater.toLocaleString()} m³    费用：¥${data.waterCost.toLocaleString()}\n`;
+        txtContent += `用气：${data.totalGas.toLocaleString()} m³    费用：¥${data.gasCost.toLocaleString()}\n`;
+        txtContent += `----------------------------------------\n`;
+        txtContent += `合计：                    费用：¥${data.totalCost.toLocaleString()}\n\n`;
+        
+        txtContent += '----------------------------------------\n';
+        txtContent += '二、费用预测\n';
+        txtContent += '----------------------------------------\n';
+        txtContent += `下月预测费用：¥${data.forecastCost.toLocaleString()}\n`;
+        txtContent += `预测趋势：较本月下降 ${costForecast.trend}%\n\n`;
+        
+        txtContent += '----------------------------------------\n';
+        txtContent += '三、碳排放估算\n';
+        txtContent += '----------------------------------------\n';
+        txtContent += `本月碳排放总量：${data.totalCarbon.toLocaleString()} kgCO₂\n`;
+        txtContent += `折算种树：约 ${Math.round(data.totalCarbon / 18)} 棵（按每棵树年吸收18kgCO₂计算）\n\n`;
+        
+        txtContent += '----------------------------------------\n';
+        txtContent += '四、同类站点能效排名\n';
+        txtContent += '----------------------------------------\n';
+        txtContent += '排名  站点名称      类型    能效指标   节能率\n';
+        data.rankings.forEach(r => {
+          const medal = r.rank === 1 ? '🏆' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : '  ';
+          txtContent += `${medal} ${r.rank.toString().padStart(2, ' ')}   ${r.name.padEnd(10, ' ')} ${r.type.padEnd(4, ' ')}  ${r.intensity.padStart(6, ' ')}   ${r.savingRate.padStart(4, ' ')}%\n`;
+        });
+        
+        txtContent += '\n========================================\n';
+        txtContent += '    本报告由铁路能源管理系统自动生成\n';
+        txtContent += '========================================\n';
+        
+        const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `铁路能源月报_${data.month}.txt`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+      
+      setIsExporting(false);
+    }, 800);
+  };
 
   return (
     <div className="space-y-6">
@@ -308,67 +457,118 @@ const Reports = () => {
 
       {reportType === 'export' && (
         <div className="bg-card border border-card-border rounded-xl p-8">
-          <div className="max-w-2xl mx-auto text-center">
-            <FileSpreadsheet className="w-16 h-16 text-primary-400 mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-white mb-2">生成月度能耗报告</h3>
-            <p className="text-gray-400 mb-6">选择报告类型和时间范围，系统将自动生成完整的能耗分析报告</p>
+          <div className="max-w-2xl mx-auto">
+            <div className="text-center mb-8">
+              <FileSpreadsheet className="w-16 h-16 text-primary-400 mx-auto mb-4" />
+              <h3 className="text-xl font-bold text-white mb-2">生成月度能耗报告</h3>
+              <p className="text-gray-400">选择报告类型和时间范围，系统将自动生成完整的能耗分析报告</p>
+            </div>
 
-            <div className="space-y-4 text-left">
-              <div>
-                <label className="text-gray-400 text-sm block mb-2">报告月份</label>
-                <input
-                  type="month"
-                  className="w-full bg-sidebar-hover border border-card-border rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
-                  defaultValue="2026-06"
-                />
-              </div>
-              <div>
-                <label className="text-gray-400 text-sm block mb-2">包含站点</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {['全部站点', '北京南站', '上海虹桥站', '广州南站', '成都东站', '北京车辆段'].map((name, idx) => (
-                    <label key={idx} className="flex items-center gap-2 p-3 bg-sidebar-hover rounded-lg cursor-pointer hover:bg-card-border/50 transition-colors">
-                      <input type="checkbox" defaultChecked={idx === 0} className="rounded border-gray-600 text-primary-600 focus:ring-primary-500" />
-                      <span className="text-gray-300 text-sm">{name}</span>
-                    </label>
-                  ))}
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-gray-400 text-sm block mb-2">报告月份</label>
+                  <input
+                    type="month"
+                    value={exportMonth}
+                    onChange={(e) => setExportMonth(e.target.value)}
+                    className="w-full bg-sidebar-hover border border-card-border rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-gray-400 text-sm block mb-2">包含站点</label>
+                  <select
+                    value={selectedStation}
+                    onChange={(e) => setSelectedStation(e.target.value)}
+                    className="w-full bg-sidebar-hover border border-card-border rounded-lg px-4 py-3 text-white focus:outline-none focus:border-primary-500"
+                  >
+                    <option value="all">全部站点</option>
+                    <option value="北京南站">北京南站</option>
+                    <option value="上海虹桥站">上海虹桥站</option>
+                    <option value="广州南站">广州南站</option>
+                    <option value="成都东站">成都东站</option>
+                    <option value="北京车辆段">北京车辆段</option>
+                    <option value="上海车辆段">上海车辆段</option>
+                  </select>
                 </div>
               </div>
-              <div>
-                <label className="text-gray-400 text-sm block mb-2">报告内容</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {['能耗概览', '分项分析', '站点排名', '设备统计', '告警分析', '节能进度', '碳排放估算', '费用分析'].map((name, idx) => (
-                    <label key={idx} className="flex items-center gap-2 p-3 bg-sidebar-hover rounded-lg cursor-pointer hover:bg-card-border/50 transition-colors">
-                      <input type="checkbox" defaultChecked={idx < 6} className="rounded border-gray-600 text-primary-600 focus:ring-primary-500" />
-                      <span className="text-gray-300 text-sm">{name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
+              
               <div>
                 <label className="text-gray-400 text-sm block mb-2">导出格式</label>
                 <div className="flex gap-3">
-                  <label className="flex-1 flex items-center justify-center gap-2 p-3 bg-primary-500/20 border border-primary-500/50 rounded-lg cursor-pointer">
-                    <input type="radio" name="format" defaultChecked className="text-primary-600" />
-                    <span className="text-primary-300 text-sm font-medium">Excel</span>
-                  </label>
-                  <label className="flex-1 flex items-center justify-center gap-2 p-3 bg-sidebar-hover border border-card-border rounded-lg cursor-pointer hover:border-primary-500/50 transition-colors">
-                    <input type="radio" name="format" className="text-primary-600" />
-                    <span className="text-gray-300 text-sm font-medium">PDF</span>
-                  </label>
+                  <button
+                    onClick={() => setExportFormat('csv')}
+                    className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-lg border transition-colors ${
+                      exportFormat === 'csv'
+                        ? 'bg-primary-500/20 border-primary-500/50 text-primary-300'
+                        : 'bg-sidebar-hover border-card-border text-gray-300 hover:border-primary-500/50'
+                    }`}
+                  >
+                    <FileSpreadsheet className="w-5 h-5" />
+                    <span className="font-medium">CSV 表格</span>
+                  </button>
+                  <button
+                    onClick={() => setExportFormat('txt')}
+                    className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-lg border transition-colors ${
+                      exportFormat === 'txt'
+                        ? 'bg-primary-500/20 border-primary-500/50 text-primary-300'
+                        : 'bg-sidebar-hover border-card-border text-gray-300 hover:border-primary-500/50'
+                    }`}
+                  >
+                    <FileSpreadsheet className="w-5 h-5" />
+                    <span className="font-medium">TXT 文本</span>
+                  </button>
                 </div>
+              </div>
+
+              <div className="p-4 bg-sidebar-hover rounded-lg">
+                <h4 className="text-white font-medium mb-3">报告预览内容</h4>
+                <div className="space-y-2 text-sm text-gray-400">
+                  <div className="flex items-center gap-2">
+                    <Check className="w-4 h-4 text-success" />
+                    <span>用电、用水、用气能耗汇总及费用</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Check className="w-4 h-4 text-success" />
+                    <span>下月费用预测（基于历史数据）</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Check className="w-4 h-4 text-success" />
+                    <span>碳排放估算及环保折算</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Check className="w-4 h-4 text-success" />
+                    <span>同类站点能效排名</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 bg-primary-500/10 border border-primary-500/30 rounded-lg">
+                <p className="text-primary-300 text-sm">
+                  当前选择：<span className="font-medium">{exportMonth} 月</span> · 
+                  <span className="font-medium"> {selectedStation === 'all' ? '全部站点' : selectedStation}</span> · 
+                  <span className="font-medium"> {exportFormat.toUpperCase()} 格式</span>
+                </p>
               </div>
             </div>
 
             <div className="flex gap-3 mt-8">
-              <button className="flex-1 py-3 bg-sidebar-hover text-gray-300 rounded-lg hover:bg-card-border transition-colors font-medium">
-                预览报告
-              </button>
               <button
-                onClick={() => alert('报告生成中，请稍候...')}
-                className="flex-1 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium flex items-center justify-center gap-2"
+                onClick={exportReport}
+                disabled={isExporting}
+                className="flex-1 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Download className="w-4 h-4" />
-                生成并下载
+                {isExporting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    生成并下载报告
+                  </>
+                )}
               </button>
             </div>
           </div>

@@ -1,33 +1,42 @@
 import { useState, useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { Target, Plus, Calendar, User as UserIcon, TrendingUp, CheckCircle, Clock, AlertCircle, Filter } from 'lucide-react';
-import { energyTasks } from '../../data/mockData';
-import type { EnergyTask } from '../../types';
+import { useStore } from '../../store';
 
 const EnergyPlan = () => {
+  const { state, addTask } = useStore();
   const [filterStatus, setFilterStatus] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    stationName: '北京南站',
+    assignee: '张工',
+    startDate: '',
+    endDate: '',
+    targetSaving: 0,
+  });
 
   const filteredTasks = useMemo(() => {
-    return energyTasks.filter(t => {
+    return state.tasks.filter(t => {
       if (filterStatus !== 'all' && t.status !== filterStatus) return false;
       return true;
     });
-  }, [filterStatus]);
+  }, [state.tasks, filterStatus]);
 
   const stats = useMemo(() => {
-    const total = energyTasks.length;
-    const inProgress = energyTasks.filter(t => t.status === 'in_progress').length;
-    const completed = energyTasks.filter(t => t.status === 'completed').length;
-    const pending = energyTasks.filter(t => t.status === 'pending').length;
-    const overdue = energyTasks.filter(t => t.status === 'overdue').length;
-    const totalTarget = energyTasks.reduce((sum, t) => sum + t.targetSaving, 0);
-    const totalActual = energyTasks.reduce((sum, t) => sum + t.actualSaving, 0);
+    const total = state.tasks.length;
+    const inProgress = state.tasks.filter(t => t.status === 'in_progress').length;
+    const completed = state.tasks.filter(t => t.status === 'completed').length;
+    const pending = state.tasks.filter(t => t.status === 'pending').length;
+    const overdue = state.tasks.filter(t => t.status === 'overdue').length;
+    const totalTarget = state.tasks.reduce((sum, t) => sum + t.targetSaving, 0);
+    const totalActual = state.tasks.reduce((sum, t) => sum + t.actualSaving, 0);
     return { total, inProgress, completed, pending, overdue, totalTarget, totalActual };
-  }, []);
+  }, [state.tasks]);
 
   const progressOption = useMemo(() => {
-    const data = energyTasks.map(t => ({
+    const data = state.tasks.map(t => ({
       name: t.title.slice(0, 8),
       target: t.targetSaving,
       actual: t.actualSaving,
@@ -43,7 +52,7 @@ const EnergyPlan = () => {
         { name: '实际节能', type: 'bar', data: data.map(d => d.actual), itemStyle: { color: '#10B981', borderRadius: [4, 4, 0, 0] }, barWidth: '30%' },
       ],
     };
-  }, []);
+  }, [state.tasks]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -63,6 +72,27 @@ const EnergyPlan = () => {
       case 'overdue': return '已逾期';
       default: return '未知';
     }
+  };
+
+  const handleSubmit = () => {
+    if (!formData.title || !formData.startDate || !formData.endDate || !formData.targetSaving) {
+      alert('请填写完整的任务信息');
+      return;
+    }
+    addTask({
+      ...formData,
+      stationId: 's1',
+    });
+    setFormData({
+      title: '',
+      description: '',
+      stationName: '北京南站',
+      assignee: '张工',
+      startDate: '',
+      endDate: '',
+      targetSaving: 0,
+    });
+    setShowAddModal(false);
   };
 
   return (
@@ -107,11 +137,11 @@ const EnergyPlan = () => {
         <div className="bg-card border border-card-border rounded-xl p-5">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-gray-400 text-sm">已完成</p>
-              <p className="text-3xl font-bold text-success mt-1">{stats.completed}</p>
+              <p className="text-gray-400 text-sm">待开始</p>
+              <p className="text-3xl font-bold text-amber-400 mt-1">{stats.pending}</p>
             </div>
-            <div className="p-3 bg-success/20 rounded-lg">
-              <CheckCircle className="w-6 h-6 text-success" />
+            <div className="p-3 bg-amber-500/20 rounded-lg">
+              <Clock className="w-6 h-6 text-amber-400" />
             </div>
           </div>
         </div>
@@ -268,6 +298,8 @@ const EnergyPlan = () => {
                 <label className="text-gray-400 text-sm block mb-2">任务名称</label>
                 <input
                   type="text"
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                   className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
                   placeholder="请输入任务名称"
                 />
@@ -275,6 +307,8 @@ const EnergyPlan = () => {
               <div>
                 <label className="text-gray-400 text-sm block mb-2">任务描述</label>
                 <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500 resize-none"
                   rows={3}
                   placeholder="请输入任务描述"
@@ -283,18 +317,30 @@ const EnergyPlan = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-gray-400 text-sm block mb-2">责任站点</label>
-                  <select className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500">
+                  <select
+                    value={formData.stationName}
+                    onChange={(e) => setFormData({ ...formData, stationName: e.target.value })}
+                    className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                  >
                     <option>北京南站</option>
                     <option>上海虹桥站</option>
                     <option>广州南站</option>
+                    <option>成都东站</option>
+                    <option>北京车辆段</option>
+                    <option>上海车辆段</option>
                   </select>
                 </div>
                 <div>
                   <label className="text-gray-400 text-sm block mb-2">责任人</label>
-                  <select className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500">
+                  <select
+                    value={formData.assignee}
+                    onChange={(e) => setFormData({ ...formData, assignee: e.target.value })}
+                    className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
+                  >
                     <option>张工</option>
                     <option>李工</option>
                     <option>王工</option>
+                    <option>赵工</option>
                   </select>
                 </div>
               </div>
@@ -303,6 +349,8 @@ const EnergyPlan = () => {
                   <label className="text-gray-400 text-sm block mb-2">开始日期</label>
                   <input
                     type="date"
+                    value={formData.startDate}
+                    onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
                     className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
                   />
                 </div>
@@ -310,6 +358,8 @@ const EnergyPlan = () => {
                   <label className="text-gray-400 text-sm block mb-2">结束日期</label>
                   <input
                     type="date"
+                    value={formData.endDate}
+                    onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
                     className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
                   />
                 </div>
@@ -318,6 +368,8 @@ const EnergyPlan = () => {
                 <label className="text-gray-400 text-sm block mb-2">目标节能量 (kWh)</label>
                 <input
                   type="number"
+                  value={formData.targetSaving || ''}
+                  onChange={(e) => setFormData({ ...formData, targetSaving: Number(e.target.value) })}
                   className="w-full bg-sidebar-hover border border-card-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-primary-500"
                   placeholder="请输入目标节能量"
                 />
@@ -331,10 +383,7 @@ const EnergyPlan = () => {
                 取消
               </button>
               <button
-                onClick={() => {
-                  alert('任务创建成功！');
-                  setShowAddModal(false);
-                }}
+                onClick={handleSubmit}
                 className="flex-1 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors font-medium"
               >
                 创建任务

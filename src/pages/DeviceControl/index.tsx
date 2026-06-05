@@ -1,36 +1,40 @@
 import { useState, useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
-import { Power, PowerOff, Clock, Thermometer, Lightbulb, Settings, Filter, PlayCircle, AlertCircle } from 'lucide-react';
-import { devices } from '../../data/mockData';
+import { Power, PowerOff, Clock, Thermometer, Lightbulb, Settings, Filter, PlayCircle, AlertCircle, List, X, Check } from 'lucide-react';
+import { useStore } from '../../store';
 import type { Device } from '../../types';
 
 const DeviceControl = () => {
+  const { state, addControlRequest } = useStore();
   const [filterType, setFilterType] = useState<'all' | 'air_conditioner' | 'lighting'>('all');
   const [filterStation, setFilterStation] = useState('all');
   const [showModal, setShowModal] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [controlAction, setControlAction] = useState<'start' | 'stop'>('start');
+  const [showRequests, setShowRequests] = useState(false);
+  const [applicant] = useState('张工');
 
   const filteredDevices = useMemo(() => {
-    return devices.filter(d => {
+    return state.devices.filter(d => {
       if (filterType !== 'all' && d.type !== filterType) return false;
       if (filterStation !== 'all' && d.stationId !== filterStation) return false;
       return true;
     });
-  }, [filterType, filterStation]);
+  }, [state.devices, filterType, filterStation]);
 
   const stats = useMemo(() => {
-    const total = devices.length;
-    const running = devices.filter(d => d.status === 'running').length;
-    const stopped = devices.filter(d => d.status === 'stopped').length;
-    const fault = devices.filter(d => d.status === 'fault').length;
-    const totalPower = devices.filter(d => d.status === 'running').reduce((sum, d) => sum + d.power, 0);
-    const totalEnergy = devices.reduce((sum, d) => sum + d.todayEnergy, 0);
-    return { total, running, stopped, fault, totalPower, totalEnergy };
-  }, []);
+    const total = state.devices.length;
+    const running = state.devices.filter(d => d.status === 'running').length;
+    const stopped = state.devices.filter(d => d.status === 'stopped').length;
+    const fault = state.devices.filter(d => d.status === 'fault').length;
+    const totalPower = state.devices.filter(d => d.status === 'running').reduce((sum, d) => sum + d.power, 0);
+    const totalEnergy = state.devices.reduce((sum, d) => sum + d.todayEnergy, 0);
+    const pendingRequests = state.controlRequests.filter(r => r.status === 'pending').length;
+    return { total, running, stopped, fault, totalPower, totalEnergy, pendingRequests };
+  }, [state.devices, state.controlRequests]);
 
   const runHoursOption = useMemo(() => {
-    const data = [...devices].sort((a, b) => b.runHours - a.runHours).slice(0, 8);
+    const data = [...state.devices].sort((a, b) => b.runHours - a.runHours).slice(0, 8);
     return {
       tooltip: { trigger: 'axis', backgroundColor: '#1E293B', borderColor: '#334155', textStyle: { color: '#fff' } },
       grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
@@ -44,7 +48,7 @@ const DeviceControl = () => {
         label: { show: true, position: 'right', color: '#9CA3AF', formatter: '{c}h' },
       }],
     };
-  }, []);
+  }, [state.devices]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -64,20 +68,117 @@ const DeviceControl = () => {
     }
   };
 
+  const getRequestStatusText = (status?: string) => {
+    switch (status) {
+      case 'pending': return '待审批';
+      case 'approved': return '已批准';
+      case 'rejected': return '已拒绝';
+      default: return '';
+    }
+  };
+
   const handleControl = (device: Device, action: 'start' | 'stop') => {
+    if (device.controlRequestStatus === 'pending') {
+      alert('该设备已有待审批的申请，请耐心等待');
+      return;
+    }
     setSelectedDevice(device);
     setControlAction(action);
     setShowModal(true);
   };
 
-  const stations = [...new Set(devices.map(d => d.stationName))];
+  const handleConfirmControl = () => {
+    if (!selectedDevice) return;
+    addControlRequest({
+      deviceIds: [selectedDevice.id],
+      deviceNames: [selectedDevice.name],
+      action: controlAction,
+      actionName: controlAction === 'start' ? '开机' : '关机',
+      applicant,
+    });
+    setShowModal(false);
+    setSelectedDevice(null);
+  };
+
+  const handleQuickAction = (action: 'temp_up' | 'timed_off' | 'batch_stop', actionName: string) => {
+    const targetDevices = state.devices.filter(d => {
+      if (action === 'temp_up') return d.type === 'air_conditioner' && d.status === 'running';
+      if (action === 'timed_off') return d.type === 'lighting';
+      if (action === 'batch_stop') return d.status === 'running' && d.status !== 'fault';
+      return false;
+    });
+    if (targetDevices.length === 0) {
+      alert('没有符合条件的设备');
+      return;
+    }
+    addControlRequest({
+      deviceIds: targetDevices.map(d => d.id),
+      deviceNames: targetDevices.map(d => d.name),
+      action,
+      actionName,
+      applicant,
+    });
+    alert(`已提交${actionName}申请，共涉及${targetDevices.length}台设备`);
+  };
+
+  const stations = [...new Set(state.devices.map(d => d.stationName))];
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">设备控制</h1>
-        <p className="text-gray-400 mt-1">监控和远程控制空调、照明等设备</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white">设备控制</h1>
+          <p className="text-gray-400 mt-1">监控和远程控制空调、照明等设备</p>
+        </div>
+        <button
+          onClick={() => setShowRequests(!showRequests)}
+          className="flex items-center gap-2 px-4 py-2.5 bg-card border border-card-border text-white rounded-lg hover:border-primary-500/50 transition-colors font-medium"
+        >
+          <List className="w-4 h-4" />
+          申请记录
+          {stats.pendingRequests > 0 && (
+            <span className="px-2 py-0.5 bg-warning text-white text-xs rounded-full">{stats.pendingRequests}</span>
+          )}
+        </button>
       </div>
+
+      {showRequests && (
+        <div className="bg-card border border-card-border rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">控制申请记录</h3>
+            <button onClick={() => setShowRequests(false)} className="text-gray-400 hover:text-white">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          {state.controlRequests.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">暂无申请记录</p>
+          ) : (
+            <div className="space-y-3 max-h-64 overflow-y-auto">
+              {state.controlRequests.map(req => (
+                <div key={req.id} className="flex items-center justify-between p-3 bg-sidebar-hover rounded-lg">
+                  <div>
+                    <p className="text-white text-sm font-medium">{req.actionName}</p>
+                    <p className="text-gray-500 text-xs">
+                      {req.deviceNames.length > 2 
+                        ? `${req.deviceNames.slice(0, 2).join('、')} 等${req.deviceNames.length}台设备`
+                        : req.deviceNames.join('、')
+                      }
+                    </p>
+                    <p className="text-gray-500 text-xs">申请人: {req.applicant} · {req.createTime}</p>
+                  </div>
+                  <span className={`px-2 py-1 rounded text-xs font-medium ${
+                    req.status === 'pending' ? 'bg-warning/20 text-warning' :
+                    req.status === 'approved' ? 'bg-success/20 text-success' :
+                    'bg-gray-500/20 text-gray-400'
+                  }`}>
+                    {req.status === 'pending' ? '待审批' : req.status === 'approved' ? '已批准' : '已拒绝'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <div className="bg-card border border-card-border rounded-xl p-4">
@@ -157,11 +258,18 @@ const DeviceControl = () => {
                       <p className="text-gray-500 text-xs">{device.stationName} · {device.location}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2.5 h-2.5 rounded-full ${getStatusColor(device.status)} ${device.status === 'running' ? 'animate-pulse' : ''}`} />
-                    <span className={`text-xs font-medium ${device.status === 'running' ? 'text-success' : device.status === 'fault' ? 'text-danger' : 'text-gray-400'}`}>
-                      {getStatusText(device.status)}
-                    </span>
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2.5 h-2.5 rounded-full ${getStatusColor(device.status)} ${device.status === 'running' ? 'animate-pulse' : ''}`} />
+                      <span className={`text-xs font-medium ${device.status === 'running' ? 'text-success' : device.status === 'fault' ? 'text-danger' : 'text-gray-400'}`}>
+                        {getStatusText(device.status)}
+                      </span>
+                    </div>
+                    {device.controlRequestStatus && (
+                      <span className="text-xs px-2 py-0.5 rounded bg-warning/20 text-warning">
+                        {getRequestStatusText(device.controlRequestStatus)}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -184,19 +292,35 @@ const DeviceControl = () => {
                   {device.status !== 'running' && device.status !== 'fault' && (
                     <button
                       onClick={() => handleControl(device, 'start')}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-success/20 text-success rounded-lg hover:bg-success/30 transition-colors text-sm font-medium"
+                      disabled={device.controlRequestStatus === 'pending'}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        device.controlRequestStatus === 'pending'
+                          ? 'bg-gray-600/50 text-gray-500 cursor-not-allowed'
+                          : 'bg-success/20 text-success hover:bg-success/30'
+                      }`}
                     >
-                      <Power className="w-4 h-4" />
-                      开机
+                      {device.controlRequestStatus === 'pending' ? (
+                        <><Clock className="w-4 h-4" /> 待审批</>
+                      ) : (
+                        <><Power className="w-4 h-4" /> 开机</>
+                      )}
                     </button>
                   )}
                   {device.status === 'running' && (
                     <button
                       onClick={() => handleControl(device, 'stop')}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-danger/20 text-danger rounded-lg hover:bg-danger/30 transition-colors text-sm font-medium"
+                      disabled={device.controlRequestStatus === 'pending'}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        device.controlRequestStatus === 'pending'
+                          ? 'bg-gray-600/50 text-gray-500 cursor-not-allowed'
+                          : 'bg-danger/20 text-danger hover:bg-danger/30'
+                      }`}
                     >
-                      <PowerOff className="w-4 h-4" />
-                      关机
+                      {device.controlRequestStatus === 'pending' ? (
+                        <><Clock className="w-4 h-4" /> 待审批</>
+                      ) : (
+                        <><PowerOff className="w-4 h-4" /> 关机</>
+                      )}
                     </button>
                   )}
                   {device.status === 'fault' && (
@@ -229,15 +353,24 @@ const DeviceControl = () => {
               快速操作
             </h3>
             <div className="space-y-3">
-              <button className="w-full flex items-center gap-3 p-3 bg-primary-600/20 border border-primary-500/30 rounded-lg hover:bg-primary-600/30 transition-colors">
+              <button
+                onClick={() => handleQuickAction('temp_up', '全部空调调高1℃')}
+                className="w-full flex items-center gap-3 p-3 bg-primary-600/20 border border-primary-500/30 rounded-lg hover:bg-primary-600/30 transition-colors"
+              >
                 <Power className="w-5 h-5 text-primary-400" />
                 <span className="text-primary-300 font-medium">全部空调 - 统一调高 1℃</span>
               </button>
-              <button className="w-full flex items-center gap-3 p-3 bg-sidebar-hover border border-card-border rounded-lg hover:border-primary-500/50 transition-colors">
+              <button
+                onClick={() => handleQuickAction('timed_off', '公共区域照明定时关闭')}
+                className="w-full flex items-center gap-3 p-3 bg-sidebar-hover border border-card-border rounded-lg hover:border-primary-500/50 transition-colors"
+              >
                 <Lightbulb className="w-5 h-5 text-amber-400" />
                 <span className="text-gray-300 font-medium">公共区域照明 - 定时关闭</span>
               </button>
-              <button className="w-full flex items-center gap-3 p-3 bg-sidebar-hover border border-card-border rounded-lg hover:border-primary-500/50 transition-colors">
+              <button
+                onClick={() => handleQuickAction('batch_stop', '非工作时段批量关机')}
+                className="w-full flex items-center gap-3 p-3 bg-sidebar-hover border border-card-border rounded-lg hover:border-primary-500/50 transition-colors"
+              >
                 <PowerOff className="w-5 h-5 text-gray-400" />
                 <span className="text-gray-300 font-medium">非工作时段 - 批量关机</span>
               </button>
@@ -259,8 +392,8 @@ const DeviceControl = () => {
               <p className="text-sm text-gray-400 mb-2">操作说明</p>
               <p className="text-sm text-gray-300">
                 {controlAction === 'start' 
-                  ? '设备启动需要约 3 分钟，启动后会自动运行至设定状态。' 
-                  : '设备停机后需要等待 5 分钟才能再次启动，以保护设备压缩机。'}
+                  ? '设备启动需要约 3 分钟，启动后会自动运行至设定状态。申请提交后需等待调度审批。' 
+                  : '设备停机后需要等待 5 分钟才能再次启动，以保护设备压缩机。申请提交后需等待调度审批。'}
               </p>
             </div>
 
@@ -272,16 +405,14 @@ const DeviceControl = () => {
                 取消
               </button>
               <button
-                onClick={() => {
-                  alert(`已提交${controlAction === 'start' ? '开机' : '关机'}申请，等待调度审批。`);
-                  setShowModal(false);
-                }}
-                className={`flex-1 py-2.5 rounded-lg font-medium transition-colors ${
+                onClick={handleConfirmControl}
+                className={`flex-1 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 ${
                   controlAction === 'start' 
                     ? 'bg-success text-white hover:bg-success/90' 
                     : 'bg-danger text-white hover:bg-danger/90'
                 }`}
               >
+                <Check className="w-4 h-4" />
                 确认{controlAction === 'start' ? '开机' : '关机'}
               </button>
             </div>
